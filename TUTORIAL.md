@@ -14,7 +14,7 @@ A live feed of GitHub's global PR stream, built on top of worktrace. This docume
 - **Event** — a timestamped thing that happened during a run
 - **Snapshot** — a full state capture of something at a point in time
 
-The reference demo for worktrace ([mempooltrack](https://github.com/Pedro-Oub/worktrace)) tracks the Bitcoin mempool: block height, fee rate, and pending transaction count. Every run captures a snapshot — run it on a schedule and you build a timeline of Bitcoin's internal rhythm.
+The worktrace README demo tracks the Bitcoin mempool: block height, fee rate, and pending transaction count. Every run captures a snapshot — run it on a schedule and you build a timeline of Bitcoin's internal rhythm.
 
 ### Looking for a better use case
 
