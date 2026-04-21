@@ -235,7 +235,9 @@ Prints one event (PR, star, or issue) as a 3-line card:
 - **Line 2**: `owner/repo  [+added -deleted]` for PRs, just `owner/repo` for stars and issues
 - **Line 3**: title truncated at 60 chars (omitted if empty)
 
-Two independent counters appear on line 1: action count (how many times this action has been seen this session) and user count (how many events from this user). Both increment before `render_event` is called, so the displayed count always reflects the current event's contribution. The elapsed string (`5m`, `1.2h`) uses `session_start` set at launch. Long action names are shortened via `DISPLAY_ACTION` (`synchronize` → `pushed`, `review_requested` → `rev_req`).
+Color scheme on line 1: action and its count use the action color; `by`, user count, and elapsed are grey42; username is bright white. This creates a clear visual hierarchy — the action pops, the username stands out, and the metadata recedes. Timestamp, owner/repo, and title are all grey42 for the same reason.
+
+Two independent counters: action count (how many times this action has been seen) and user count (how many events this user has triggered). Both increment before `render_event` is called, so the displayed count always reflects the current event. Elapsed uses `session_start` set at launch. Long action names are shortened via `DISPLAY_ACTION` (`synchronize` → `pushed`, `review_requested` → `rev_req`).
 
 Three event types are handled: `PR`, `★` (star), `#` (issue). Each has its own counter dicts so PR counts and star counts stay independent.
 

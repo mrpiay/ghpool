@@ -226,11 +226,10 @@ def render_event(ev: dict) -> None:
         elapsed_str = f"{elapsed / 3600:.1f}h"
 
     user_display = ev["user"][:20]
-    action_stat = f"{label} ({a_count}) by {user_display} ({u_count}) · {elapsed_str}"
     owner, _, repo_name = ev["repo"].partition("/")
     repo_display = f"{owner[:20]}/{repo_name[:20]}"
 
-    console.print(f"[grey42]{ev['time']}[/grey42]  [{color}]{prefix:<3} {action_stat}[/{color}]")
+    console.print(f"[grey42]{ev['time']}[/grey42]  [{color}]{prefix:<3} {label} ({a_count})[/{color}] [grey42]by[/grey42] [bright_white]{user_display}[/bright_white] [grey42]({u_count}) · {elapsed_str}[/grey42]")
 
     if kind == "pr":
         added = f"+{ev['added'] / 1000:.1f}k" if ev["added"] >= 1000 else f"+{ev['added']}"
