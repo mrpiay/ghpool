@@ -1,9 +1,10 @@
 """
-ghpool — live GitHub PR stream with worktrace history
+ghpool — live GitHub activity stream with worktrace history
 
 Polls the GitHub public Events API every 5 seconds, filters for
-PullRequestEvents, displays them as a live feed, and records everything
-to a local SQLite database via worktrace.
+pull requests, stars, issues, forks, and releases, displays them
+as a live feed, and records everything to a local SQLite database
+via worktrace.
 
 Usage:
     python ghpool.py             # record session to SQLite

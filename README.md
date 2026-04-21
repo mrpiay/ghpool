@@ -1,8 +1,10 @@
 # ghpool
 
-A real-time feed of GitHub's global pull request stream, inspired by [mempool.space](https://mempool.space).
+A real-time feed of GitHub's global activity, inspired by [mempool.space](https://mempool.space).
 
-Every open PR across GitHub is like a transaction waiting to be confirmed. ghpool surfaces that stream live — who's opening, merging, and closing PRs right now, across every public repo on GitHub — and stores a queryable history of it using [worktrace](https://github.com/Pedro-Oub/worktrace).
+ghpool originated as a real-world use case for [worktrace](https://github.com/Pedro-Oub/worktrace) — a way to test and validate its functionality against a continuous, unpredictable data source.
+
+Every open PR across GitHub is like a transaction waiting to be confirmed. ghpool surfaces that stream live — pull requests, stars, issues, forks, and releases as they happen across every public repo on GitHub — using the public GitHub Events API. Optionally, every session can be recorded to a local SQLite database via [worktrace](https://github.com/Pedro-Oub/worktrace), making the feed queryable after the fact. Pass `--no-record` to run as a pure live feed with nothing written to disk.
 
 ```
 10:03:43  PR  merged (1) by bartoszruta26 (1) · 3m
@@ -28,10 +30,10 @@ Every open PR across GitHub is like a transaction waiting to be confirmed. ghpoo
 
 ## What makes this different
 
-Most GitHub PR tools show *your* PRs or *your org's* PRs. ghpool watches all of GitHub — every public repo, every language, every timezone — and builds a timeline you can query.
+Most GitHub tools show *your* activity or *your org's*. ghpool watches all of GitHub — every public repo, every language, every timezone.
 
 - **Live stream** — pull requests, stars, issues, forks, and releases appear as they happen, every 5 seconds
-- **Persistent history** — every session is stored in a local SQLite database via worktrace (pass `--no-record` to skip)
+- **Persistent history** (optional) — sessions are recorded to a local SQLite database via worktrace, pass `--no-record` to skip
 - **Queryable** — replay any session, filter by repo, action, or user, compute merge rates over time
 
 ---
@@ -69,7 +71,7 @@ python ghpool.py --no-record # live feed only, nothing written to disk
 
 ## Two-terminal setup (recommended)
 
-Open two terminals side by side for the best experience.
+Open two terminals side by side for the best experience (activate the venv in both).
 
 **Terminal A** — the live stream:
 ```bash
@@ -140,8 +142,7 @@ print(f"merge ratio: {ratio:.0%}")
 
 ## Documentation
 
-- [TUTORIAL.md](TUTORIAL.md) — full walkthrough: motivation, code explained line by line, all queries, terminal setup
-- [WORKTRACE.md](WORKTRACE.md) — worktrace integration reference: what gets recorded and how to query it
+- [TUTORIAL.md](TUTORIAL.md) — full walkthrough: motivation, setup, running, what gets recorded, and all queries
 ---
 
 ## Built on

@@ -1,10 +1,8 @@
 # ghpool — complete tutorial
 
-**ghpool** is a Python script that watches GitHub's public Events API and prints every pull request event happening across all public repos in real time — opens, merges, closes, labels — as they occur, every 5 seconds.
+**ghpool** is a Python script that watches GitHub's public Events API and prints pull requests, stars, issues, forks, and releases happening across all public repos in real time, every 5 seconds.
 
-Beyond the live feed, every session is recorded to a local SQLite database via [worktrace](https://github.com/Pedro-Oub/worktrace). That means you can stop the script, come back later, and query the full history: which repos were most active, how many PRs merged in the last hour, what a specific user was working on. The terminal ticker and the queryable timeline are the same tool.
-
-This document covers how the idea came about, how every line of code works, and what you can do with the data it collects.
+Optionally, every session can be recorded to a local SQLite database via [worktrace](https://github.com/Pedro-Oub/worktrace) (pass `--no-record` to skip). That means you can stop the script, come back later, and query the full history: which repos were most active, how many PRs merged in the last hour, what a specific user was working on. The terminal ticker and the queryable timeline are the same tool.
 
 ---
 
@@ -18,11 +16,9 @@ This document covers how the idea came about, how every line of code works, and 
 - **Event** — a timestamped thing that happened during a run
 - **Snapshot** — a full state capture of something at a point in time
 
-The worktrace README demo tracks the Bitcoin mempool: block height, fee rate, and pending transaction count. Every run captures a snapshot — run it on a schedule and you build a timeline of Bitcoin's internal rhythm.
+### Looking for a use case
 
-### Looking for a better use case
-
-The mempool demo is good but the visualization already exists at [mempool.space](https://mempool.space). The goal was to find something where:
+The goal was to find a use case where:
 
 1. **State changes constantly on its own** — so every snapshot differs from the last
 2. **No auth required** (or easy to get) — so anyone can reproduce it
@@ -32,16 +28,7 @@ The mempool demo is good but the visualization already exists at [mempool.space]
 
 GitHub exposes a public Events API (`api.github.com/events`) that returns the most recent public activity across all of GitHub — every push, star, fork, issue, and pull request, updated every few seconds.
 
-The PR activity maps perfectly onto the mempool concept:
-
-| Bitcoin mempool | ghpool |
-|---|---|
-| Transactions waiting to be confirmed | Open PRs waiting to be merged |
-| Transaction size (vB) | PR size (lines changed) |
-| Fee rate (sat/vB) | PR "heat" (comments, reviews, approvals) |
-| Block mined → mempool empties | Merge wave → PR queue shrinks |
-
-Nothing like mempool.space exists for GitHub's global PR stream. There are per-org dashboards (Graphite, Pullp) and GitHub's own PR inbox, but no one is visualizing the queue of PRs flowing across all of GitHub in real time. ghpool is that tool.
+The name ghpool comes from [mempool.space](https://mempool.space), a real-time visualization of Bitcoin's transaction queue. There are per-org dashboards (Graphite, Pullp) and GitHub's own PR inbox, but nothing that visualizes activity flowing across all of GitHub in real time. ghpool is that tool.
 
 ---
 
@@ -85,299 +72,7 @@ GITHUB_TOKEN=ghp_yourtoken123abc
 
 ---
 
-## Part 3 — the code, line by line
-
-### Imports and config
-
-```python
-import os
-import time
-import argparse
-import requests
-from collections import Counter
-from dotenv import load_dotenv
-from rich.console import Console
-import worktrace as wt
-
-load_dotenv()
-```
-
-- `Counter` — Python's built-in dict for counting things. Used to track how many `opened`, `merged`, `starred`, etc. events we've seen this session.
-- `argparse` — parses the `--no-record` flag.
-- `worktrace as wt` — installed via `pip install worktrace`, aliased to `wt` to keep calls compact.
-- `load_dotenv()` — reads `.env` and puts `GITHUB_TOKEN` into the environment.
-
-```python
-TOKEN = os.getenv("GITHUB_TOKEN")
-HEADERS = {"Authorization": f"Bearer {TOKEN}"} if TOKEN else {}
-POLL_INTERVAL = 5
-```
-
-- If the token is present, every API request includes an `Authorization` header. If not, requests are unauthenticated (60 req/hr limit).
-- `POLL_INTERVAL = 5` — fetch new events every 5 seconds. Safe with a token. Change to `60` without one.
-
-```python
-seen: set[str] = set()
-action_counts: Counter = Counter()   # PR actions
-repo_counts: Counter = Counter()     # PR repos
-user_counts: Counter = Counter()     # PR users
-star_counts: Counter = Counter()     # star actions
-star_user_counts: Counter = Counter()
-issue_action_counts: Counter = Counter()
-issue_user_counts: Counter = Counter()
-fork_counts: Counter = Counter()
-fork_user_counts: Counter = Counter()
-release_counts: Counter = Counter()
-release_user_counts: Counter = Counter()
-poll_count = 0
-session_start: float = 0.0
-```
-
-- `seen` — a set of event IDs we've already processed. GitHub returns the same events across multiple polls; this prevents duplicates.
-- Each event type (PR, star, issue, fork, release) has its own action and user counter dicts so their counts stay independent.
-- `session_start` — set at launch, used to compute the elapsed time shown on every event card.
-
----
-
-### fetch_events()
-
-```python
-def fetch_events() -> list[dict]:
-    r = requests.get(
-        "https://api.github.com/events",
-        headers={**HEADERS, "Accept": "application/vnd.github+json"},
-        params={"per_page": 100},
-        timeout=10,
-    )
-    r.raise_for_status()
-    return r.json()
-```
-
-Calls GitHub's public events endpoint. `per_page=100` gets 100 events per call (default is 30). `raise_for_status()` throws an exception on any HTTP error (4xx, 5xx) so the caller can catch it cleanly.
-
-Returns a list of event dicts. Each event has a `type` field — we only care about `PullRequestEvent`.
-
----
-
-### fetch_pr_details()
-
-```python
-def fetch_pr_details(url: str) -> dict:
-    try:
-        r = requests.get(url, headers={...}, timeout=8)
-        if r.status_code == 200:
-            return r.json()
-    except Exception:
-        pass
-    return {}
-```
-
-The GitHub Events API sometimes returns PR events with incomplete payloads — title and user can be null, additions/deletions missing. When that happens, we fetch the full PR object from its own URL (`pr["url"]` in the payload). Returns an empty dict on any failure so the caller always gets something safe to work with.
-
----
-
-### parse_pr()
-
-```python
-def parse_pr(event: dict) -> dict | None:
-    if event.get("type") != "PullRequestEvent":
-        return None
-    try:
-        pr = event["payload"]["pull_request"]
-        title = (pr.get("title") or "").strip()
-        user = (pr.get("user") or {}).get("login", "")
-        added = pr.get("additions")
-        deleted = pr.get("deletions")
-
-        if not title or not user or added is None:
-            details = fetch_pr_details(pr.get("url", ""))
-            title = title or (details.get("title") or "")
-            user = user or (details.get("user") or {}).get("login", "?")
-            added = added if added is not None else details.get("additions", 0)
-            deleted = deleted if deleted is not None else details.get("deletions", 0)
-
-        return {
-            "id": event["id"],
-            "action": event["payload"].get("action", "?"),
-            "repo": event["repo"]["name"],
-            "title": title[:80],
-            "added": added or 0,
-            "deleted": deleted or 0,
-            "user": user,
-            "time": event["created_at"][11:19],
-        }
-    except (KeyError, TypeError):
-        return None
-```
-
-Turns a raw GitHub event dict into a clean PR dict. Steps:
-
-1. Skip anything that isn't a `PullRequestEvent`
-2. Extract title, user, additions, deletions from the payload
-3. If any are missing, call `fetch_pr_details()` to get the full object
-4. Return a flat, clean dict — or `None` if anything goes wrong
-
-`added or 0` converts `None` to `0`. Title truncation happens in `render_pr` at 60 characters.
-
----
-
-### render_event()
-
-```python
-def render_event(ev: dict) -> None:
-    kind = ev.get("kind", "pr")
-    # ... kind-specific color and counter selection ...
-    action_stat = f"{label} ({a_count}) by {user_display} ({u_count}) · {elapsed_str}"
-    console.print(f"[grey42]{ev['time']}[/grey42]  [{color}]{prefix:<3} {action_stat}[/{color}]")
-    if kind == "pr":
-        size = f"[+{ev['added']} -{ev['deleted']}]"
-        console.print(f"{'':10}{repo_display}  {size}")
-    else:
-        console.print(f"{'':10}{repo_display}")
-    if ev["title"]:
-        title = ev["title"][:60] + "..." if len(ev["title"]) > 60 else ev["title"]
-        console.print(f"[grey42]{'':10}{title}[/grey42]")
-    console.print()
-```
-
-Prints one event (PR, star, or issue) as a 3-line card:
-- **Line 1**: timestamp (UTC) · type prefix · `ACTION (count) by username (count) · elapsed` — action is color-coded
-- **Line 2**: `owner/repo  [+added -deleted]` for PRs, just `owner/repo` for stars and issues
-- **Line 3**: title truncated at 60 chars (omitted if empty)
-
-Color scheme on line 1: action and its count use the action color; `by`, user count, and elapsed are grey42; username is bright white. This creates a clear visual hierarchy — the action pops, the username stands out, and the metadata recedes. Timestamp, owner/repo, and title are all grey42 for the same reason.
-
-Two independent counters: action count (how many times this action has been seen) and user count (how many events this user has triggered). Both increment before `render_event` is called, so the displayed count always reflects the current event. Elapsed uses `session_start` set at launch. Long action names are shortened via `DISPLAY_ACTION` (`synchronize` → `pushed`, `review_requested` → `rev_req`).
-
-Five event types are handled: `PR`, `*` (star), `#` (issue), `FK` (fork), `RL` (release). Each has its own counter dicts so PR counts, star counts, fork counts, and release counts stay independent.
-
-Each action gets its own color:
-
-| Action | Display | Color |
-|---|---|---|
-| opened | opened | green |
-| merged | merged | magenta |
-| closed | closed | red |
-| reopened | reopened | yellow |
-| synchronize | pushed | cyan |
-| labeled | labeled | blue |
-| unlabeled | unlabeled | blue |
-| assigned | assigned | yellow |
-| unassigned | unassigned | yellow |
-| review_requested | rev_req | cyan |
-| review_request_removed | rev_req_rm | cyan |
-| ready_for_review | ready | green |
-| converted_to_draft | draft | white |
-| — (fork) | forked | blue |
-| — (release) | published | cyan |
-
----
-
-### record_poll() — the worktrace heart
-
-```python
-def record_poll(run: wt.Run, new_prs: list[dict], total_events: int) -> None:
-    global poll_count
-    poll_count += 1
-
-    for pr in new_prs:
-        action_counts[pr["action"]] += 1
-        repo_counts[pr["repo"]] += 1
-
-    wt.event(
-        "poll.done",
-        resource="github/events",
-        data={"total_events": total_events, "new_prs": len(new_prs), "poll_number": poll_count},
-        run=run,
-    )
-
-    for pr in new_prs:
-        wt.event(
-            f"pr.{pr['action']}",
-            resource=f"gh/{pr['repo']}",
-            data={"title": pr["title"], "user": pr["user"], "added": pr["added"], "deleted": pr["deleted"]},
-            run=run,
-        )
-
-    wt.snapshot(
-        resource="gh/pr-stream",
-        kind="activity",
-        data={
-            "poll_count": poll_count,
-            "total_prs_this_session": sum(action_counts.values()),
-            "by_action": dict(action_counts),
-            "top_repos": dict(repo_counts.most_common(10)),
-        },
-        run=run,
-    )
-```
-
-This is where ghpool becomes more than a ticker. If recording is enabled (default), three things happen per poll:
-
-1. **`poll.done` event** — records that a poll cycle completed, how many total events came back, how many were new.
-
-2. **One typed event per item** — each PR, star, fork, or release gets its own event (`pr.opened`, `star.starred`, `fork.forked`, `release.published`), tagged with the repo as resource. Query `query.events(resource="gh/torvalds/linux")` to see all activity on one repo.
-
-3. **One snapshot** — captures the full aggregate state of the session at this moment: total PRs seen, breakdown by action, top 10 most active repos. This is the time-series. Every poll adds one row to the snapshot history.
-
-If `--no-record` was passed, all `wt.*` calls are skipped — the live feed works exactly the same, nothing is written to disk.
-
----
-
-### Main block
-
-```python
-args = parser.parse_args()
-RECORD = not args.no_record
-
-run = wt.start_run(...) if RECORD else None
-```
-
-`--no-record` sets `RECORD = False` and `run = None`. Every `wt.*` call downstream is gated on `if run:`, so recording is fully skipped without changing any display logic. The title line shows `· recording on` (green) or `· recording off` (red) immediately on startup.
-
-```python
-# seed phase
-initial = fetch_events()
-initial_evs = [parse_event(e) for e in initial]
-for e in initial:
-    seen.add(e["id"])
-for ev in initial_evs:
-    # increment counters, render card
-    ...
-if run:
-    wt.event("session.start", ...)
-```
-
-The seed phase shows the current state immediately on launch and marks all existing events as seen. Without this, the first poll would dump up to 100 events at once.
-
-```python
-# poll loop
-while True:
-    time.sleep(POLL_INTERVAL)
-    if run:
-        wt.event("poll.start", ...)
-    events = fetch_events()
-    ...
-    record_poll(run, new_events, len(events))
-```
-
-Every 5 seconds: fetch, display new events, write to worktrace if recording. A failed fetch emits `poll.failed` (if recording) and `continue`s — the loop keeps running.
-
-```python
-except KeyboardInterrupt:
-    wt.event("session.end", data={...}, run=run)
-    wt.end_run(run, status="success")
-```
-
-Ctrl+C closes the run cleanly. `session.end` records the final totals. The run is marked `success`.
-
----
-
-## Part 4 — running and testing
-
-All commands below assume your project folder is `C:/ghpool` and you are using Git Bash or a similar Unix-style terminal on Windows. PowerShell equivalents are noted where they differ.
-
----
+## Part 3 — running ghpool
 
 ### One-terminal flow (simplest)
 
@@ -406,7 +101,7 @@ python ghpool.py
 You will see:
 
 ```
-ghpool — live GitHub PR stream  (Ctrl+C to stop)
+ghpool — live GitHub PR stream  (Ctrl+C to stop)  · recording on
 
 token loaded · 100 events fetched
 
@@ -421,7 +116,15 @@ token loaded · 100 events fetched
 Watching for new events every 5s...
 ```
 
-The first batch shows existing PRs from the current GitHub event window. After that, new PRs appear every 5 seconds as they happen globally.
+The first batch shows existing events from the current GitHub event window. After that, new events appear every 5 seconds as they happen globally.
+
+To run without recording to the database:
+
+```bash
+python ghpool.py --no-record
+```
+
+The title line shows `· recording on` (green) or `· recording off` (red) so you always know.
 
 **Step 4 — stop and inspect**
 
@@ -435,23 +138,11 @@ worktrace runs --tag github
 worktrace show-run <id-prefix>
 ```
 
-**Step 5 — query snapshots**
-
-```bash
-python -c "
-from worktrace import query
-for s in query.snapshots(resource='gh/pr-stream', kind='activity'):
-    print(s.timestamp[11:19], s.data['by_action'])
-"
-```
-
-You will see one line per poll cycle, showing how the PR action counts evolved over the session.
-
 ---
 
 ### Two-terminal flow (recommended — watch events live while ghpool runs)
 
-**Terminal A** — runs ghpool and produces events.  
+**Terminal A** — runs ghpool and produces events.
 **Terminal B** — tails the worktrace database and shows events as they are written.
 
 They communicate through the SQLite file at `~/.worktrace/worktrace.db`. Neither terminal needs to know about the other.
@@ -498,7 +189,7 @@ Then silence. Terminal B is now blocked, waiting for new events. Leave it alone.
 python ghpool.py
 ```
 
-As soon as new PR events are detected, they appear in **both** terminals simultaneously — in Terminal A as colored cards, in Terminal B as raw structured events from worktrace.
+As soon as new events are detected, they appear in **both** terminals simultaneously — in Terminal A as colored cards, in Terminal B as raw structured events from worktrace.
 
 ---
 
@@ -541,44 +232,45 @@ worktrace show-run <id-prefix>
 
 ---
 
-**Step 7 — stop both and run Python queries**
+### Display format
 
-Stop ghpool in Terminal A with `Ctrl+C`. Stop the tail in Terminal B with `Ctrl+C`.
+Each event is printed as a 2–3 line card:
 
-In either terminal, run the queries from Part 5 below. Examples:
-
-```bash
-# top repos across all sessions
-python -c "
-from worktrace import query
-from collections import Counter
-counts = Counter()
-for s in query.snapshots(resource='gh/pr-stream', kind='activity'):
-    for repo, n in s.data.get('top_repos', {}).items():
-        counts[repo] += n
-for repo, total in counts.most_common(10):
-    print(f'{total:>6}  {repo}')
-"
-
-# all merges ever recorded
-python -c "
-from worktrace import query
-merges = query.events(type_prefix='pr.merged')
-print(len(merges), 'merges recorded')
-for e in merges[:5]:
-    print(' ', e.timestamp[11:19], e.resource_uri, e.data.get('title','')[:50])
-"
-
-# replay a session
-python -c "
-from worktrace import query
-runs = query.runs(tag='github')
-run_id = runs[0].id   # most recent session
-events = query.events(type_prefix='pr.*', run_id=run_id)
-for e in events:
-    print(e.timestamp[11:19], e.type, e.resource_uri)
-"
 ```
+HH:MM:SS (UTC)  [type] ACTION (count) by username (count) · elapsed
+                owner/repo  [+added -deleted]   ← line counts only for PRs
+                title (truncated at 60 chars)    ← omitted if empty
+```
+
+Five event types, each with an ASCII prefix:
+
+| Prefix | Type | Color |
+|---|---|---|
+| `PR` | pull request | action color |
+| `*` | star | yellow |
+| `#` | issue | action color |
+| `FK` | fork | blue |
+| `RL` | release | cyan |
+
+PR actions and their colors:
+
+| Action | Display | Color |
+|---|---|---|
+| opened | opened | green |
+| merged | merged | magenta |
+| closed | closed | red |
+| reopened | reopened | yellow |
+| synchronize | pushed | cyan |
+| labeled | labeled | blue |
+| unlabeled | unlabeled | blue |
+| assigned | assigned | yellow |
+| unassigned | unassigned | yellow |
+| review_requested | rev_req | cyan |
+| review_request_removed | rev_req_rm | cyan |
+| ready_for_review | ready | green |
+| converted_to_draft | draft | white |
+
+Two independent counters per event: action count (how many times this action has been seen) and user count (how many events this user has triggered). Elapsed is time since session start.
 
 ---
 
@@ -587,6 +279,7 @@ for e in events:
 | What | Command |
 |---|---|
 | Start ghpool | `python ghpool.py` |
+| Start without recording | `python ghpool.py --no-record` |
 | Watch all PR events live | `worktrace tail --type pr.*` |
 | Watch only merges | `worktrace tail --type pr.merged` |
 | Watch one repo | `worktrace tail --resource gh/owner/repo` |
@@ -598,92 +291,236 @@ for e in events:
 
 ---
 
-## Part 5 — what you can do with the data
+## Part 4 — what gets recorded
 
-### Terminal — while ghpool runs
+When recording is enabled (the default), ghpool writes to worktrace using three primitives: runs, events, and snapshots. All data lives at `~/.worktrace/worktrace.db` — a local SQLite file. Delete it to start fresh. No server, no account, no sync.
 
-Open a second terminal, activate the venv, then:
+Pass `--no-record` to skip all writes and run as a pure live feed.
 
-```bash
-# watch all PR events live
-worktrace tail --type pr.*
+### Run
 
-# watch only merges
-worktrace tail --type pr.merged
+One per script execution.
 
-# watch one specific repo
-worktrace tail --resource gh/facebook/react
-
-# watch poll health
-worktrace tail --type poll.*
+```
+name:     ghpool
+tags:     ["github", "prs"]
+metadata: {"poll_interval": 5, "token": true}
 ```
 
-### Terminal — after stopping
+### Events
 
-```bash
-# list all ghpool sessions
-worktrace runs --tag github
+| Type | Resource | Data | When |
+|---|---|---|---|
+| `session.start` | — | `seeded_events`, `seeded_prs` | Script launches |
+| `session.seed_failed` | — | `error` | Seed fetch fails |
+| `poll.start` | `github/events` | — | Each poll cycle begins |
+| `poll.done` | `github/events` | `total_events`, `new_prs`, `poll_number` | Each poll cycle ends |
+| `poll.failed` | `github/events` | `error` | API call fails |
+| `pr.opened` | `gh/<owner/repo>` | `title`, `user`, `added`, `deleted` | New PR opened |
+| `pr.merged` | `gh/<owner/repo>` | same | PR merged |
+| `pr.closed` | `gh/<owner/repo>` | same | PR closed without merge |
+| `pr.reopened` | `gh/<owner/repo>` | same | Closed PR reopened |
+| `pr.synchronize` | `gh/<owner/repo>` | same | New commits pushed to open PR |
+| `pr.labeled` | `gh/<owner/repo>` | same | Label added |
+| `pr.unlabeled` | `gh/<owner/repo>` | same | Label removed |
+| `pr.assigned` | `gh/<owner/repo>` | same | Reviewer assigned |
+| `pr.unassigned` | `gh/<owner/repo>` | same | Reviewer unassigned |
+| `pr.review_requested` | `gh/<owner/repo>` | same | Review requested |
+| `pr.review_request_removed` | `gh/<owner/repo>` | same | Review request removed |
+| `pr.ready_for_review` | `gh/<owner/repo>` | same | Draft marked ready |
+| `pr.converted_to_draft` | `gh/<owner/repo>` | same | PR converted to draft |
+| `star.starred` | `gh/<owner/repo>` | `title`, `user`, `added`, `deleted` | Repo starred |
+| `issue.opened` | `gh/<owner/repo>` | same | Issue opened |
+| `issue.closed` | `gh/<owner/repo>` | same | Issue closed |
+| `issue.reopened` | `gh/<owner/repo>` | same | Issue reopened |
+| `fork.forked` | `gh/<owner/repo>` | `title` (forked repo name), `user` | Repo forked |
+| `release.published` | `gh/<owner/repo>` | `title` (release name/tag), `user` | Release published |
+| `session.end` | — | `poll_count`, `total_prs`, `by_action` | Ctrl+C |
 
-# inspect a full session
-worktrace show-run <id-prefix>
+### Snapshot (every poll cycle)
 
-# only failed sessions
-worktrace runs --tag github --status failed
 ```
-
-### Python queries
-
-```python
-from worktrace import query
-
-# --- replay a session's PR stream ---
-events = query.events(type_prefix="pr.*", run_id="<full-run-id>")
-for e in events:
-    repo = e.resource_uri.replace("gh/", "")
-    print(f"{e.timestamp[11:19]}  {e.type:<20}  {repo:<40}  {e.data.get('title','')[:50]}")
-
-# --- all merges ever recorded ---
-merges = query.events(type_prefix="pr.merged")
-print(f"{len(merges)} merges recorded across all sessions")
-
-# --- activity on a specific repo across all sessions ---
-events = query.events(resource="gh/torvalds/linux")
-for e in events:
-    print(e.timestamp[:19], e.type, e.data.get("title", ""))
-
-# --- snapshot time-series: how did activity evolve? ---
-for s in query.snapshots(resource="gh/pr-stream", kind="activity"):
-    print(s.timestamp[11:19], s.data["by_action"])
-
-# --- top repos across all sessions ---
-from collections import Counter
-counts = Counter()
-for s in query.snapshots(resource="gh/pr-stream", kind="activity"):
-    for repo, n in s.data.get("top_repos", {}).items():
-        counts[repo] += n
-for repo, total in counts.most_common(20):
-    print(f"{total:>6}  {repo}")
-
-# --- merge rate over time ---
-for s in query.snapshots(resource="gh/pr-stream", kind="activity"):
-    merges = s.data.get("by_action", {}).get("merged", 0)
-    polls  = s.data.get("poll_count", 1)
-    print(f"{s.timestamp[11:19]}  merges/poll: {merges/polls:.2f}")
-
-# --- failed poll cycles ---
-failures = query.events(type_prefix="poll.failed")
-for e in failures:
-    print(e.timestamp[:19], e.data.get("error"))
-
-# --- PRs by a specific user across all sessions ---
-all_prs = query.events(type_prefix="pr.*")
-user_prs = [e for e in all_prs if e.data.get("user") == "dependabot"]
-print(f"dependabot: {len(user_prs)} PR events recorded")
+resource: gh/pr-stream
+kind:     activity
+data:
+  poll_count:             int   — how many polls so far this session
+  total_prs_this_session: int   — total PR events seen
+  by_action:              dict  — {"opened": 12, "merged": 8, "closed": 3, ...}
+  top_repos:              dict  — top 10 repos by PR event count
 ```
 
 ---
 
-## Part 5 — what comes next (v2 ideas)
+## Part 5 — querying your data
+
+### CLI queries
+
+```bash
+# list all ghpool sessions with timestamps
+worktrace runs --tag github
+
+# inspect a full session — every poll cycle and every event
+worktrace show-run <id-prefix>
+
+# all events from the last 2 hours
+worktrace tail --since -2h
+```
+
+### Python query API
+
+```python
+from worktrace import query
+
+# --- events ---
+
+# all PR events ever recorded
+query.events(type_prefix="pr.*")
+
+# only merges
+query.events(type_prefix="pr.merged")
+
+# all activity on a specific repo
+query.events(resource="gh/torvalds/linux")
+
+# failed poll cycles
+query.events(type_prefix="poll.failed")
+
+# everything from the last 2 hours
+query.events(since="-2h")
+
+# all PR events from a specific session
+query.events(type_prefix="pr.*", run_id="<full-run-id>")
+
+# --- snapshots ---
+
+# full time-series of session activity snapshots
+query.snapshots(resource="gh/pr-stream")
+
+# snapshots from a specific session
+query.snapshots(resource="gh/pr-stream", run_id="<full-run-id>")
+
+# --- runs ---
+
+# all sessions
+query.runs(tag="github")
+
+# only sessions that completed without errors
+query.runs(tag="github", status="success")
+
+# sessions from the last day
+query.runs(tag="github", since="-1d")
+```
+
+### Example: replay a session's event stream
+
+```python
+from worktrace import query
+
+run_id = "<your-run-id>"
+for e in query.events(type_prefix="pr.*", run_id=run_id):
+    repo = e.resource_uri.replace("gh/", "")
+    print(f"{e.timestamp[11:19]}  {e.type:<20}  {repo:<40}  {e.data.get('title','')[:50]}")
+```
+
+### Example: top repos across all sessions
+
+```python
+from worktrace import query
+from collections import Counter
+
+counts = Counter()
+for s in query.snapshots(resource="gh/pr-stream", kind="activity"):
+    for repo, n in s.data.get("top_repos", {}).items():
+        counts[repo] += n
+
+for repo, total in counts.most_common(20):
+    print(f"{total:>6}  {repo}")
+```
+
+### Example: most active users globally
+
+```python
+from worktrace import query
+from collections import Counter
+
+counts = Counter()
+for e in query.events(type_prefix="pr.*"):
+    counts[e.data.get("user", "?")] += 1
+
+for user, n in counts.most_common(20):
+    print(f"{n:>6}  {user}")
+```
+
+### Example: spot bots
+
+```python
+from worktrace import query
+from collections import Counter
+
+KNOWN_BOTS = {"dependabot", "renovate", "github-actions", "dependabot[bot]"}
+
+counts = Counter()
+for e in query.events(type_prefix="pr.opened"):
+    user = e.data.get("user", "")
+    if user in KNOWN_BOTS or "[bot]" in user:
+        counts[user] += 1
+
+for bot, n in counts.most_common():
+    print(f"{n:>6}  {bot}")
+```
+
+### Example: largest PRs ever seen
+
+```python
+from worktrace import query
+
+events = sorted(
+    query.events(type_prefix="pr.*"),
+    key=lambda e: e.data.get("added", 0) + e.data.get("deleted", 0),
+    reverse=True,
+)
+for e in events[:10]:
+    total = e.data.get("added", 0) + e.data.get("deleted", 0)
+    repo = e.resource_uri.replace("gh/", "")
+    print(f"{total:>8} lines  {repo}  {e.data.get('title','')[:50]}")
+```
+
+### Example: merge ratio
+
+```python
+from worktrace import query
+from collections import Counter
+
+actions = Counter(e.type for e in query.events(type_prefix="pr.*"))
+merged = actions["pr.merged"]
+closed = actions["pr.closed"]
+ratio = merged / max(1, merged + closed)
+print(f"merged: {merged}  closed: {closed}  ratio: {ratio:.0%}")
+```
+
+### Example: merge rate over time
+
+```python
+from worktrace import query
+
+for s in query.snapshots(resource="gh/pr-stream", kind="activity"):
+    merges = s.data.get("by_action", {}).get("merged", 0)
+    polls  = s.data.get("poll_count", 1)
+    print(f"{s.timestamp[11:19]}  merges/poll: {merges/polls:.2f}")
+```
+
+### Example: all activity on a specific repo
+
+```python
+from worktrace import query
+
+for e in query.events(resource="gh/torvalds/linux"):
+    print(f"{e.timestamp[11:19]}  {e.type}  {e.data.get('user')}  {e.data.get('title','')[:60]}")
+```
+
+---
+
+## Part 6 — what comes next (v2 ideas)
 
 ### Heatmap
 Group repos by PR activity over time. Which repos are hottest right now vs an hour ago? A Rich-based grid in the terminal or a simple web page.
@@ -710,7 +547,6 @@ ghpool/
   requirements.txt — dependencies
   PLAN.md          — original project plan
   TUTORIAL.md      — this file
-  WORKTRACE.md     — worktrace integration reference
   .env             — your GitHub token (never committed)
   .gitignore       — excludes .env and .venv
   .venv/           — Python virtual environment
