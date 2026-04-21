@@ -1,6 +1,10 @@
 # ghpool — complete tutorial
 
-A live feed of GitHub's global PR stream, built on top of worktrace. This document covers how the idea came about, how every line of code works, and what you can do with the data it collects.
+**ghpool** is a Python script that watches GitHub's public Events API and prints every pull request event happening across all public repos in real time — opens, merges, closes, labels — as they occur, every 5 seconds.
+
+Beyond the live feed, every session is recorded to a local SQLite database via [worktrace](https://github.com/Pedro-Oub/worktrace). That means you can stop the script, come back later, and query the full history: which repos were most active, how many PRs merged in the last hour, what a specific user was working on. The terminal ticker and the queryable timeline are the same tool.
+
+This document covers how the idea came about, how every line of code works, and what you can do with the data it collects.
 
 ---
 
