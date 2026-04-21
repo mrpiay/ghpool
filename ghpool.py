@@ -5,8 +5,6 @@ from collections import Counter
 from dotenv import load_dotenv
 from rich.console import Console
 
-import sys
-sys.path.insert(0, "../worktrace")
 import worktrace as wt
 
 load_dotenv()

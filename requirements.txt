@@ -1,3 +1,4 @@
+worktrace
 requests
 python-dotenv
 rich
