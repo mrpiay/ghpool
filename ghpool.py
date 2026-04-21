@@ -26,11 +26,14 @@ TOKEN = os.getenv("GITHUB_TOKEN")
 HEADERS = {"Authorization": f"Bearer {TOKEN}"} if TOKEN else {}
 POLL_INTERVAL = 5  # seconds — safe with token, change to 60 without
 
-console = Console()
-seen: set[str] = set()          # event IDs already displayed — prevents duplicates across polls
+console = Console(highlight=False)
+seen: set[str] = set()              # event IDs already displayed — prevents duplicates across polls
 action_counts: Counter = Counter()  # running tally of PR actions this session
 repo_counts: Counter = Counter()    # running tally of repos by PR activity
+user_counts: Counter = Counter()    # running tally of users by PR activity
 poll_count = 0
+session_start: float = 0.0
+
 
 
 # ---------------------------------------------------------------------------
@@ -91,7 +94,7 @@ def parse_pr(event: dict) -> dict | None:
             "id": event["id"],
             "action": event["payload"].get("action", "?"),
             "repo": event["repo"]["name"],
-            "title": title[:80],
+            "title": title,
             "added": added or 0,
             "deleted": deleted or 0,
             "user": user,
@@ -110,22 +113,50 @@ ACTION_COLOR = {
     "merged": "magenta",
     "closed": "red",
     "reopened": "yellow",
-    "synchronize": "cyan",  # new commits pushed to an open PR
+    "synchronize": "cyan",
     "labeled": "blue",
+    "unlabeled": "blue",
     "assigned": "yellow",
+    "unassigned": "yellow",
+    "review_requested": "cyan",
+    "review_request_removed": "cyan",
+    "ready_for_review": "green",
+    "converted_to_draft": "white",
+}
+
+DISPLAY_ACTION = {
+    "synchronize": "pushed",
+    "review_requested": "rev_req",
+    "review_request_removed": "rev_req_rm",
+    "ready_for_review": "ready",
+    "converted_to_draft": "draft",
 }
 
 
 def render_pr(pr: dict) -> None:
     """Print one PR as a two-line card to the terminal."""
     color = ACTION_COLOR.get(pr["action"], "white")
-    size = f"[dim]+{pr['added']} -{pr['deleted']}[/dim]"
-    console.print(
-        f"[dim]{pr['time']}[/dim]  [{color}]{pr['action']}[/{color}]  "
-        f"[bold]{pr['repo']}[/bold]  [dim]{pr['user']}[/dim]"
-    )
+    label = DISPLAY_ACTION.get(pr["action"], pr["action"])
+    elapsed = time.time() - session_start
+    if elapsed < 60:
+        elapsed_str = f"{int(elapsed)}s"
+    elif elapsed < 3600:
+        elapsed_str = f"{int(elapsed / 60)}m"
+    else:
+        elapsed_str = f"{elapsed / 3600:.1f}h"
+    action_stat = f"{label} ({action_counts[pr['action']]}/{elapsed_str})"
+    owner, _, repo_name = pr["repo"].partition("/")
+    repo_display = f"{owner[:20]}/{repo_name[:20]}"
+    user_display = pr["user"][:20]
+    user_stat = f"{user_display} ({user_counts[pr['user']]}/{elapsed_str})"
+    added = f"+{pr['added'] / 1000:.1f}k" if pr["added"] >= 1000 else f"+{pr['added']}"
+    deleted = f"-{pr['deleted'] / 1000:.1f}k" if pr["deleted"] >= 1000 else f"-{pr['deleted']}"
+    size = f"[{added} {deleted}]"
+    console.print(f"[grey42]{pr['time']}[/grey42]  [{color}]{action_stat}[/{color}]")
+    console.print(f"{'':10}{repo_display}  {user_stat}  {size}")
     if pr["title"]:
-        console.print(f"  {pr['title']}  {size}")
+        title = pr["title"][:60] + "..." if len(pr["title"]) > 60 else pr["title"]
+        console.print(f"[grey42]{'':10}{title}[/grey42]")
     console.print()
 
 
@@ -143,10 +174,12 @@ def record_poll(run: wt.Run, new_prs: list[dict], total_events: int) -> None:
     global poll_count
     poll_count += 1
 
-    # update session-level counters
+    # update session-level counters and render each PR as its count increments
     for pr in new_prs:
         action_counts[pr["action"]] += 1
         repo_counts[pr["repo"]] += 1
+        user_counts[pr["user"]] += 1
+        render_pr(pr)
 
     # record that this poll cycle completed
     wt.event(
@@ -193,21 +226,30 @@ def record_poll(run: wt.Run, new_prs: list[dict], total_events: int) -> None:
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    console.print("[bold]ghpool[/bold] — live GitHub PR stream  [dim](Ctrl+C to stop)[/dim]\n")
-    console.print("[dim]Each PR is shown as two lines:[/dim]")
-    console.print("[dim]  HH:MM:SS  ACTION  owner/repo  username[/dim]")
-    console.print("[dim]  PR title  +added -deleted lines[/dim]")
     console.print()
-    console.print(
-        f"[dim]Actions: "
-        f"[green]opened[/green]  "
-        f"[magenta]merged[/magenta]  "
-        f"[red]closed[/red]  "
-        f"[cyan]synchronize[/cyan]  "
-        f"[blue]labeled[/blue]  "
-        f"[yellow]assigned/reopened[/yellow][/dim]"
-    )
+    console.print(f"[bold bright_white]ghpool — live GitHub PR stream  (Ctrl+C to stop)[/bold bright_white]\n")
+    console.print("PR format:")
+    console.print("HH:MM:SS (UTC)  ACTION (count / elapsed)")
+    console.print("          owner/repo  username (count / elapsed)  [+added -deleted]")
+    console.print("          PR title (60 chars)")
     console.print()
+    console.print("Actions:")
+    console.print("[green]opened[/green]")
+    console.print("[magenta]merged[/magenta]")
+    console.print("[red]closed[/red]")
+    console.print("[yellow]reopened[/yellow]")
+    console.print("[cyan]pushed[/cyan]")
+    console.print("[blue]labeled[/blue]")
+    console.print("[blue]unlabeled[/blue]")
+    console.print("[yellow]assigned[/yellow]")
+    console.print("[yellow]unassigned[/yellow]")
+    console.print("[cyan]rev_req[/cyan]")
+    console.print("[cyan]rev_req_rm[/cyan]")
+    console.print("[green]ready[/green]")
+    console.print("[white]draft[/white]")
+    console.print()
+
+    session_start = time.time()
 
     # open a worktrace run for this session
     run = wt.start_run(
@@ -220,16 +262,19 @@ if __name__ == "__main__":
     # without this, the first poll would dump up to 100 events at once
     try:
         initial = fetch_events()
-        token_status = "[green]token loaded[/green]" if TOKEN else "[red]no token — unauthenticated[/red]"
-        console.print(f"[dim]{token_status} · {len(initial)} events fetched[/dim]\n")
+        token_status = "token loaded" if TOKEN else "[red]no token — unauthenticated[/red]"
+        console.print(f"{token_status} · {len(initial)} events fetched\n")
         initial_prs = [parse_pr(e) for e in initial]
         initial_prs = [p for p in initial_prs if p]
         for e in initial:
             seen.add(e["id"])
         for pr in initial_prs:
+            action_counts[pr["action"]] += 1
+            repo_counts[pr["repo"]] += 1
+            user_counts[pr["user"]] += 1
             render_pr(pr)
         wt.event("session.start", data={"seeded_events": len(initial), "seeded_prs": len(initial_prs)}, run=run)
-        console.print(f"[dim]Watching for new events every {POLL_INTERVAL}s...[/dim]\n")
+        console.print(f"Watching for new events every {POLL_INTERVAL}s...\n")
     except Exception as ex:
         wt.event("session.seed_failed", data={"error": str(ex)}, run=run)
         console.print(f"[red]Failed to seed: {ex}[/red]")
@@ -256,9 +301,6 @@ if __name__ == "__main__":
                     new_prs.append(pr)
 
             record_poll(run, new_prs, len(events))
-
-            for pr in new_prs:
-                render_pr(pr)
 
     except KeyboardInterrupt:
         console.print("\n[dim]stopped.[/dim]")

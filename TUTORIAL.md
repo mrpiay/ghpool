@@ -124,6 +124,7 @@ poll_count = 0
 - `seen` — a set of event IDs we've already processed. GitHub returns the same events across multiple polls; this prevents duplicates.
 - `action_counts` — running tally of PR actions this session: `{"opened": 12, "merged": 8, ...}`
 - `repo_counts` — running tally of which repos have the most PR activity
+- `user_counts` — running tally of users by PR activity, shown inline next to each username
 - `poll_count` — how many poll cycles have completed this session
 
 ---
@@ -206,7 +207,7 @@ Turns a raw GitHub event dict into a clean PR dict. Steps:
 3. If any are missing, call `fetch_pr_details()` to get the full object
 4. Return a flat, clean dict — or `None` if anything goes wrong
 
-`title[:80]` caps the title at 80 characters for display. `added or 0` converts `None` to `0`.
+`added or 0` converts `None` to `0`. Title truncation happens in `render_pr` at 60 characters.
 
 ---
 
@@ -215,27 +216,42 @@ Turns a raw GitHub event dict into a clean PR dict. Steps:
 ```python
 def render_pr(pr: dict) -> None:
     color = ACTION_COLOR.get(pr["action"], "white")
-    size = f"[dim]+{pr['added']} -{pr['deleted']}[/dim]"
-    console.print(
-        f"[dim]{pr['time']}[/dim]  [{color}]{pr['action']}[/{color}]  "
-        f"[bold]{pr['repo']}[/bold]  [dim]{pr['user']}[/dim]"
-    )
+    label = DISPLAY_ACTION.get(pr["action"], pr["action"])
+    size = f"[grey42][+{pr['added']} -{pr['deleted']}][/grey42]"
+    action_stat = f"{label} ({action_counts[pr['action']]})"
+    user_stat = f"{pr['user']} ({user_counts[pr['user']]})"
+    console.print(f"[grey42]{pr['time']}[/grey42]  [{color}]{action_stat}[/{color}]")
+    console.print(f"{'':10}{pr['repo']}  {user_stat}  {size}")
     if pr["title"]:
-        console.print(f"  {pr['title']}  {size}")
+        title = pr["title"][:60] + "..." if len(pr["title"]) > 60 else pr["title"]
+        console.print(f"[grey42]{'':10}{title}[/grey42]")
     console.print()
 ```
 
-Prints one PR as a two-line card. Rich markup (`[green]`, `[bold]`, `[dim]`) handles colors. Each action gets its own color:
+Prints one PR as a 3-line card:
+- **Line 1**: timestamp (UTC) + action with session count — action is color-coded
+- **Line 2**: repo, username with session count, line diff
+- **Line 3**: PR title, truncated at 60 chars
 
-| Action | Color |
-|---|---|
-| opened | green |
-| merged | magenta |
-| closed | red |
-| reopened | yellow |
-| synchronize | cyan |
-| labeled | blue |
-| assigned | yellow |
+Session counters (`action_counts`, `user_counts`) are incremented before each `render_pr` call, so the count shown reflects that PR's contribution. The elapsed time (`session_start` global, set at launch) turns raw counts into a rate — `opened (12/5m)` means 12 opens in the first 5 minutes. Long action names are shortened via `DISPLAY_ACTION` for readability.
+
+Each action gets its own color:
+
+| Action | Display | Color |
+|---|---|---|
+| opened | opened | green |
+| merged | merged | magenta |
+| closed | closed | red |
+| reopened | reopened | yellow |
+| synchronize | pushed | cyan |
+| labeled | labeled | blue |
+| unlabeled | unlabeled | blue |
+| assigned | assigned | yellow |
+| unassigned | unassigned | yellow |
+| review_requested | rev_req | cyan |
+| review_request_removed | rev_req_rm | cyan |
+| ready_for_review | ready | green |
+| converted_to_draft | draft | white |
 
 ---
 
