@@ -1,10 +1,23 @@
+"""
+ghpool — live GitHub PR stream with worktrace history
+
+Polls the GitHub public Events API every 5 seconds, filters for
+PullRequestEvents, displays them as a live feed, and records everything
+to a local SQLite database via worktrace.
+
+Usage:
+    python ghpool.py
+
+Requires a .env file with GITHUB_TOKEN=<your token>.
+See README.md for setup instructions.
+"""
+
 import os
 import time
 import requests
 from collections import Counter
 from dotenv import load_dotenv
 from rich.console import Console
-
 import worktrace as wt
 
 load_dotenv()
@@ -14,11 +27,9 @@ HEADERS = {"Authorization": f"Bearer {TOKEN}"} if TOKEN else {}
 POLL_INTERVAL = 5  # seconds — safe with token, change to 60 without
 
 console = Console()
-seen: set[str] = set()
-
-# session-level counters for snapshots
-action_counts: Counter = Counter()
-repo_counts: Counter = Counter()
+seen: set[str] = set()          # event IDs already displayed — prevents duplicates across polls
+action_counts: Counter = Counter()  # running tally of PR actions this session
+repo_counts: Counter = Counter()    # running tally of repos by PR activity
 poll_count = 0
 
 
@@ -27,6 +38,7 @@ poll_count = 0
 # ---------------------------------------------------------------------------
 
 def fetch_events() -> list[dict]:
+    """Fetch the latest 100 public GitHub events."""
     r = requests.get(
         "https://api.github.com/events",
         headers={**HEADERS, "Accept": "application/vnd.github+json"},
@@ -38,6 +50,11 @@ def fetch_events() -> list[dict]:
 
 
 def fetch_pr_details(url: str) -> dict:
+    """Fetch the full PR object from its API URL.
+
+    The events payload sometimes omits title, user, and line counts.
+    This fills in the gaps when needed.
+    """
     try:
         r = requests.get(url, headers={**HEADERS, "Accept": "application/vnd.github+json"}, timeout=8)
         if r.status_code == 200:
@@ -48,6 +65,11 @@ def fetch_pr_details(url: str) -> dict:
 
 
 def parse_pr(event: dict) -> dict | None:
+    """Extract a clean PR dict from a raw GitHub event.
+
+    Returns None for non-PR events or events with unrecoverable missing data.
+    Falls back to fetch_pr_details() if the events payload is incomplete.
+    """
     if event.get("type") != "PullRequestEvent":
         return None
     try:
@@ -57,6 +79,7 @@ def parse_pr(event: dict) -> dict | None:
         added = pr.get("additions")
         deleted = pr.get("deletions")
 
+        # the events API sometimes returns incomplete payloads — fetch the full PR if needed
         if not title or not user or added is None:
             details = fetch_pr_details(pr.get("url", ""))
             title = title or (details.get("title") or "")
@@ -72,7 +95,7 @@ def parse_pr(event: dict) -> dict | None:
             "added": added or 0,
             "deleted": deleted or 0,
             "user": user,
-            "time": event["created_at"][11:19],
+            "time": event["created_at"][11:19],  # HH:MM:SS from ISO timestamp
         }
     except (KeyError, TypeError):
         return None
@@ -87,13 +110,14 @@ ACTION_COLOR = {
     "merged": "magenta",
     "closed": "red",
     "reopened": "yellow",
-    "synchronize": "cyan",
+    "synchronize": "cyan",  # new commits pushed to an open PR
     "labeled": "blue",
     "assigned": "yellow",
 }
 
 
 def render_pr(pr: dict) -> None:
+    """Print one PR as a two-line card to the terminal."""
     color = ACTION_COLOR.get(pr["action"], "white")
     size = f"[dim]+{pr['added']} -{pr['deleted']}[/dim]"
     console.print(
@@ -110,14 +134,21 @@ def render_pr(pr: dict) -> None:
 # ---------------------------------------------------------------------------
 
 def record_poll(run: wt.Run, new_prs: list[dict], total_events: int) -> None:
-    """Emit a poll.done event and write a snapshot of current session state."""
+    """Write one poll cycle to worktrace: a poll.done event, one pr.* event
+    per new PR, and a snapshot of the full session state.
+
+    The snapshot is what builds the queryable time-series — every poll adds
+    one row, so you can later compare activity across minutes or hours.
+    """
     global poll_count
     poll_count += 1
 
+    # update session-level counters
     for pr in new_prs:
         action_counts[pr["action"]] += 1
         repo_counts[pr["repo"]] += 1
 
+    # record that this poll cycle completed
     wt.event(
         "poll.done",
         resource="github/events",
@@ -129,6 +160,7 @@ def record_poll(run: wt.Run, new_prs: list[dict], total_events: int) -> None:
         run=run,
     )
 
+    # one event per PR — queryable by repo via resource="gh/owner/repo"
     for pr in new_prs:
         wt.event(
             f"pr.{pr['action']}",
@@ -142,6 +174,7 @@ def record_poll(run: wt.Run, new_prs: list[dict], total_events: int) -> None:
             run=run,
         )
 
+    # snapshot of session aggregate state — one per poll, stacks up over time
     wt.snapshot(
         resource="gh/pr-stream",
         kind="activity",
@@ -162,13 +195,15 @@ def record_poll(run: wt.Run, new_prs: list[dict], total_events: int) -> None:
 if __name__ == "__main__":
     console.print("[bold]ghpool[/bold] — live GitHub PR stream  [dim](Ctrl+C to stop)[/dim]\n")
 
+    # open a worktrace run for this session
     run = wt.start_run(
         name="ghpool",
         tags=["github", "prs"],
         metadata={"poll_interval": POLL_INTERVAL, "token": bool(TOKEN)},
     )
 
-    # seed: show existing PRs and mark all current events as seen
+    # seed: fetch current events, show existing PRs, mark all as seen
+    # without this, the first poll would dump up to 100 events at once
     try:
         initial = fetch_events()
         token_status = "[green]token loaded[/green]" if TOKEN else "[red]no token — unauthenticated[/red]"
@@ -196,6 +231,7 @@ if __name__ == "__main__":
                 console.print(f"[red]fetch error: {ex}[/red]")
                 continue
 
+            # collect only events we haven't seen before
             new_prs = []
             for e in events:
                 if e["id"] in seen:
@@ -212,6 +248,7 @@ if __name__ == "__main__":
 
     except KeyboardInterrupt:
         console.print("\n[dim]stopped.[/dim]")
+        # close the run cleanly with final session totals
         wt.event(
             "session.end",
             data={
