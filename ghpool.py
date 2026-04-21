@@ -384,7 +384,7 @@ if __name__ == "__main__":
     RECORD = not args.no_record
 
     console.print()
-    record_label = "" if RECORD else "  [grey42]· recording off[/grey42]"
+    record_label = "  [green]· recording on[/green]" if RECORD else "  [red]· recording off[/red]"
     console.print(f"[bold bright_white]ghpool — live GitHub PR stream  (Ctrl+C to stop)[/bold bright_white]{record_label}\n")
     console.print("Format:")
     console.print(r"HH:MM:SS (UTC)  \[type] ACTION (count) by username (count) · elapsed")
