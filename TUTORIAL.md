@@ -351,7 +351,44 @@ data:
 
 ---
 
-## Part 5 — querying your data
+## Part 5 — web viewer
+
+The web app at [mrpiay.github.io/ghpool](https://mrpiay.github.io/ghpool/) has two tabs:
+
+- **Feed** — live GitHub activity stream in the browser (no install, no recording)
+- **Viewer** — drop your `worktrace.db` to browse sessions and run queries
+
+### Prebuilt queries
+
+The viewer includes 17 prebuilt SQL queries. Select a session to scope queries to it, or run them across all sessions.
+
+| Query | What it shows |
+|---|---|
+| Sessions | Duration, event counts, and status for each session |
+| Poll health | Empty vs productive polls, hit rate, avg events per poll |
+| Timeline | Events per minute broken down by type |
+| Busiest hours | Events by hour of day (UTC) — PRs, stars, and total |
+| Top repos | Most active repos by PR events |
+| Hot repos | Most active repos across all event types with unique users |
+| Top users | Most active users by PR events |
+| Repeat users | Users with multiple PR events, their repo count, and actions |
+| PR actions | Count of each PR action: opened, merged, closed, etc. |
+| Action ratios | PR actions (opened/merged/closed/reopened), merge %, and totals by event type |
+| Activity rate | Per-minute rate of all event types |
+| Largest PRs | Biggest PRs by lines added + deleted |
+| Bots | Bot accounts detected in PR events (dependabot, renovate, etc.) |
+| Most starred | Repos with the most star events |
+| Most forked | Repos with the most fork events |
+| Issues | Issue actions: opened, closed, reopened, etc. |
+| Releases | Recent releases with repo, name, and user |
+
+### Custom SQL
+
+The viewer also has a SQL editor (Ctrl+Enter to run). The database has three tables: `runs`, `events`, `snapshots` — the same schema documented in Part 4 above.
+
+---
+
+## Part 6 — querying your data from the terminal
 
 ### CLI queries
 

@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ghp●●l</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app">
+    <!-- Top bar with tabs -->
+    <div class="top-bar">
+      <div class="top-left">
+        <span class="logo">ghp●●l</span>
+        <div class="tabs">
+          <button class="tab active" data-tab="feed">Feed</button>
+          <button class="tab" data-tab="viewer">Viewer</button>
+        </div>
+      </div>
+      <div class="top-right">
+        <div class="feed-controls" id="feed-controls">
+          <input type="text" id="token-input" placeholder="GitHub token (optional)" spellcheck="false">
+          <button id="btn-start">Start</button>
+          <button id="btn-stop" disabled>Stop</button>
+          <button id="btn-clear">Clear</button>
+        </div>
+        <button id="btn-theme" class="btn-small">Dark</button>
+      </div>
+    </div>
+
+    <!-- FEED tab -->
+    <div class="tab-content active" id="tab-feed">
+      <div id="feed" class="feed"></div>
+      <div id="feed-status" class="feed-status"></div>
+    </div>
+
+    <!-- VIEWER tab -->
+    <div class="tab-content" id="tab-viewer">
+      <!-- Drop zone -->
+      <div id="drop-zone" class="drop-zone">
+        <div class="drop-zone-content">
+          <div class="drop-icon">db</div>
+          <div>Drop <code>worktrace.db</code> here or <label for="file-input" class="file-label">browse</label></div>
+          <div class="dim path-hint">Default location: <code id="db-path"></code> <button id="btn-copy-path" class="btn-small">Copy path</button></div>
+        </div>
+        <input type="file" id="file-input" accept=".db,.sqlite,.sqlite3" hidden>
+      </div>
+
+      <!-- Viewer content (hidden until db loaded) -->
+      <div id="viewer" class="viewer hidden">
+        <div class="viewer-layout">
+          <!-- Left: Sessions + Events -->
+          <div class="viewer-left">
+            <div class="viewer-section">
+              <div class="section-header">
+                <span>Sessions</span>
+                <button id="btn-close-db" class="btn-small">Close DB</button>
+              </div>
+              <div id="runs-list" class="runs-list"></div>
+            </div>
+
+            <div id="run-detail" class="viewer-section hidden">
+              <div class="section-header">
+                <span>Events <span class="dim" id="events-count"></span></span>
+              </div>
+              <div id="run-events" class="run-events"></div>
+            </div>
+          </div>
+
+          <!-- Right: Queries + SQL + Results -->
+          <div class="viewer-right">
+            <div class="viewer-section">
+              <div class="section-header">Queries <span class="dim" id="query-scope"></span></div>
+              <div class="query-buttons">
+                <button class="btn-query" data-query="session-summary" data-desc="Duration, event counts, and status for each session">Sessions</button>
+                <button class="btn-query" data-query="poll-health" data-desc="Empty vs productive polls, hit rate, avg events per poll">Poll health</button>
+                <button class="btn-query" data-query="activity-timeline" data-desc="Events per minute broken down by type">Timeline</button>
+                <button class="btn-query" data-query="busiest-hours" data-desc="Events by hour of day (UTC) — PRs, stars, and total">Busiest hours</button>
+                <button class="btn-query" data-query="top-repos" data-desc="Most active repos by PR events">Top repos</button>
+                <button class="btn-query" data-query="hot-repos" data-desc="Most active repos across all event types with unique users">Hot repos</button>
+                <button class="btn-query" data-query="top-users" data-desc="Most active users by PR events">Top users</button>
+                <button class="btn-query" data-query="repeat-users" data-desc="Users with multiple PR events, their repo count, and actions">Repeat users</button>
+                <button class="btn-query" data-query="pr-actions" data-desc="Count of each PR action: opened, merged, closed, etc.">PR actions</button>
+                <button class="btn-query" data-query="action-ratios" data-desc="PR actions (opened/merged/closed/reopened), merge %, and totals by event type">Action ratios</button>
+                <button class="btn-query" data-query="activity-rate" data-desc="Per-minute rate of all event types">Activity rate</button>
+                <button class="btn-query" data-query="largest-prs" data-desc="Biggest PRs by lines added + deleted">Largest PRs</button>
+                <button class="btn-query" data-query="bots" data-desc="Bot accounts detected in PR events (dependabot, renovate, etc.)">Bots</button>
+                <button class="btn-query" data-query="most-starred" data-desc="Repos with the most star events">Most starred</button>
+                <button class="btn-query" data-query="most-forked" data-desc="Repos with the most fork events">Most forked</button>
+                <button class="btn-query" data-query="issues-overview" data-desc="Issue actions: opened, closed, reopened, etc.">Issues</button>
+                <button class="btn-query" data-query="releases" data-desc="Recent releases with repo, name, and user">Releases</button>
+              </div>
+              <div id="query-desc" class="query-desc"></div>
+            </div>
+
+            <div class="viewer-section">
+              <div class="section-header">
+                <span>Custom SQL</span>
+                <button id="btn-run-sql" class="btn-small">Run</button>
+              </div>
+              <textarea id="sql-editor" class="sql-editor" spellcheck="false" placeholder="Write SQL here..."></textarea>
+            </div>
+
+            <div id="results" class="viewer-section hidden">
+              <div class="section-header">Results</div>
+              <div id="results-table" class="results-table"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.12.0/sql-wasm.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

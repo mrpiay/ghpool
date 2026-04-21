@@ -38,6 +38,17 @@ Most GitHub tools show *your* activity or *your org's*. ghpool watches all of Gi
 
 ---
 
+## Web app
+
+**[ghp●●l](https://mrpiay.github.io/ghpool/)** — the browser version. No install needed.
+
+- **Feed tab** — same live stream as the terminal, runs entirely in the browser using the GitHub Events API
+- **Viewer tab** — drop your `worktrace.db` file to browse sessions, explore events, and run prebuilt or custom SQL queries against your recorded data
+
+The web app doesn’t record to a database — for persistent history, use the terminal version with worktrace. The viewer is where you explore what you recorded.
+
+---
+
 ## Quick start
 
 **1. Clone and install**
@@ -142,10 +153,12 @@ print(f"merge ratio: {ratio:.0%}")
 
 ## Documentation
 
-- [TUTORIAL.md](TUTORIAL.md) — full walkthrough: motivation, setup, running, what gets recorded, and all queries
+- [TUTORIAL.md](TUTORIAL.md) — full walkthrough: motivation, setup, terminal usage, what gets recorded, and all queries
+- [Web app](https://mrpiay.github.io/ghpool/) — live feed and worktrace session viewer in the browser
 ---
 
 ## Built on
 
 - [worktrace](https://github.com/Pedro-Oub/worktrace) by Pedro-Oub — workflow memory for Python scripts
 - [GitHub Events API](https://docs.github.com/en/rest/activity/events) — public, free, no special scopes required
+- [sql.js](https://github.com/sql-js/sql.js) — SQLite compiled to WebAssembly, powers the web viewer
