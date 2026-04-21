@@ -384,7 +384,8 @@ if __name__ == "__main__":
     RECORD = not args.no_record
 
     console.print()
-    console.print(f"[bold bright_white]ghpool — live GitHub PR stream  (Ctrl+C to stop)[/bold bright_white]\n")
+    record_label = "" if RECORD else "  [grey42]· recording off[/grey42]"
+    console.print(f"[bold bright_white]ghpool — live GitHub PR stream  (Ctrl+C to stop)[/bold bright_white]{record_label}\n")
     console.print("Format:")
     console.print(r"HH:MM:SS (UTC)  \[type] ACTION (count) by username (count) · elapsed")
     console.print("                owner/repo  [+added -deleted]")
@@ -423,8 +424,7 @@ if __name__ == "__main__":
     try:
         initial = fetch_events()
         token_status = "token loaded" if TOKEN else "[red]no token — unauthenticated[/red]"
-        record_status = "" if RECORD else " · [grey42]recording off[/grey42]"
-        console.print(f"{token_status} · {len(initial)} events fetched{record_status}\n")
+        console.print(f"{token_status} · {len(initial)} events fetched\n")
         initial_evs = [parse_event(e) for e in initial]
         initial_evs = [ev for ev in initial_evs if ev]
         for e in initial:
