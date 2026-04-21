@@ -194,6 +194,20 @@ def record_poll(run: wt.Run, new_prs: list[dict], total_events: int) -> None:
 
 if __name__ == "__main__":
     console.print("[bold]ghpool[/bold] — live GitHub PR stream  [dim](Ctrl+C to stop)[/dim]\n")
+    console.print("[dim]Each PR is shown as two lines:[/dim]")
+    console.print("[dim]  HH:MM:SS  ACTION  owner/repo  username[/dim]")
+    console.print("[dim]  PR title  +added -deleted lines[/dim]")
+    console.print()
+    console.print(
+        f"[dim]Actions: "
+        f"[green]opened[/green]  "
+        f"[magenta]merged[/magenta]  "
+        f"[red]closed[/red]  "
+        f"[cyan]synchronize[/cyan]  "
+        f"[blue]labeled[/blue]  "
+        f"[yellow]assigned/reopened[/yellow][/dim]"
+    )
+    console.print()
 
     # open a worktrace run for this session
     run = wt.start_run(
