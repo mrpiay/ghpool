@@ -47,7 +47,6 @@ Nothing like mempool.space exists for GitHub's global PR stream. There are per-o
 
 - Python 3.10+
 - A free GitHub account (for the token)
-- The worktrace library (included in this repo as `../worktrace`)
 
 ### Install
 
@@ -61,6 +60,7 @@ pip install -r requirements.txt
 ```
 
 `requirements.txt` installs:
+- `worktrace` — run history, events, and snapshots
 - `requests` — HTTP calls to the GitHub API
 - `python-dotenv` — loads the GitHub token from `.env`
 - `rich` — colored terminal output
@@ -92,16 +92,13 @@ import requests
 from collections import Counter
 from dotenv import load_dotenv
 from rich.console import Console
-
-import sys
-sys.path.insert(0, "../worktrace")
 import worktrace as wt
 
 load_dotenv()
 ```
 
 - `Counter` — Python's built-in dict for counting things. Used to track how many `opened`, `merged`, `closed` events we've seen this session.
-- `sys.path.insert(0, "../worktrace")` — tells Python to look in the local worktrace clone first, before PyPI. This ensures we're running our modified version (with the cached DB connection fix from the PR we submitted).
+- `worktrace as wt` — installed via `pip install worktrace`, aliased to `wt` to keep calls compact.
 - `load_dotenv()` — reads `.env` and puts `GITHUB_TOKEN` into the environment.
 
 ```python
