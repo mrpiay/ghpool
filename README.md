@@ -13,12 +13,15 @@ Every open PR across GitHub is like a transaction waiting to be confirmed. ghpoo
           pharo-spec/NewTools  [+61 -1]
           [Method Browser] Refactoring command migration
 
-10:04:32  PR  merged (2) by mthines (1) · 4m
-          mthines/gw-tools  [+34 -3]
-          fix(shell): validate nav marker path exists before cd
-
-10:04:47  ★   starred (1) by darylwui (1) · 4m
+10:04:32  *   starred (1) by darylwui (1) · 4m
           darylwui/plsfundme
+
+10:04:47  FK  forked (1) by tsurantino (1) · 4m
+          torvalds/linux
+
+10:05:01  RL  published (1) by vercel (1) · 5m
+          vercel/next.js
+          v14.2.3
 ```
 
 ---

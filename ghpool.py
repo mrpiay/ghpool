@@ -35,6 +35,10 @@ star_counts: Counter = Counter()          # star actions
 star_user_counts: Counter = Counter()     # star users
 issue_action_counts: Counter = Counter()  # issue actions
 issue_user_counts: Counter = Counter()    # issue users
+fork_counts: Counter = Counter()          # fork actions
+fork_user_counts: Counter = Counter()     # fork users
+release_counts: Counter = Counter()       # release actions
+release_user_counts: Counter = Counter()  # release users
 poll_count = 0
 session_start: float = 0.0
 
@@ -149,9 +153,50 @@ def parse_issue(event: dict) -> dict | None:
         return None
 
 
+def parse_fork(event: dict) -> dict | None:
+    """Extract a fork event from a ForkEvent."""
+    if event.get("type") != "ForkEvent":
+        return None
+    try:
+        return {
+            "id": event["id"],
+            "kind": "fork",
+            "action": "forked",
+            "repo": event["repo"]["name"],
+            "title": event["payload"]["forkee"]["full_name"],
+            "added": 0,
+            "deleted": 0,
+            "user": event["actor"]["login"],
+            "time": event["created_at"][11:19],
+        }
+    except (KeyError, TypeError):
+        return None
+
+
+def parse_release(event: dict) -> dict | None:
+    """Extract a release event from a ReleaseEvent."""
+    if event.get("type") != "ReleaseEvent":
+        return None
+    try:
+        release = event["payload"]["release"]
+        return {
+            "id": event["id"],
+            "kind": "release",
+            "action": event["payload"].get("action", "published"),
+            "repo": event["repo"]["name"],
+            "title": (release.get("name") or release.get("tag_name") or "").strip(),
+            "added": 0,
+            "deleted": 0,
+            "user": event["actor"]["login"],
+            "time": event["created_at"][11:19],
+        }
+    except (KeyError, TypeError):
+        return None
+
+
 def parse_event(event: dict) -> dict | None:
-    """Try to parse an event as a PR, star, or issue."""
-    return parse_pr(event) or parse_star(event) or parse_issue(event)
+    """Try to parse an event as a PR, star, issue, fork, or release."""
+    return parse_pr(event) or parse_star(event) or parse_issue(event) or parse_fork(event) or parse_release(event)
 
 
 # ---------------------------------------------------------------------------
@@ -193,7 +238,7 @@ ISSUE_ACTION_COLOR = {
     "unassigned": "yellow",
 }
 
-KIND_PREFIX = {"pr": "PR", "star": "★", "issue": "#"}
+KIND_PREFIX = {"pr": "PR", "star": "* ", "issue": "# ", "fork": "FK", "release": "RL"}
 
 
 def render_event(ev: dict) -> None:
@@ -202,7 +247,7 @@ def render_event(ev: dict) -> None:
     prefix = KIND_PREFIX.get(kind, "PR")
 
     if kind == "star":
-        color = "yellow"
+        color = "bright_yellow"
         label = "starred"
         a_count = star_counts[ev["action"]]
         u_count = star_user_counts[ev["user"]]
@@ -211,6 +256,16 @@ def render_event(ev: dict) -> None:
         label = ev["action"]
         a_count = issue_action_counts[ev["action"]]
         u_count = issue_user_counts[ev["user"]]
+    elif kind == "fork":
+        color = "blue"
+        label = "forked"
+        a_count = fork_counts[ev["action"]]
+        u_count = fork_user_counts[ev["user"]]
+    elif kind == "release":
+        color = "yellow"
+        label = ev["action"]
+        a_count = release_counts[ev["action"]]
+        u_count = release_user_counts[ev["user"]]
     else:
         color = ACTION_COLOR.get(ev["action"], "white")
         label = DISPLAY_ACTION.get(ev["action"], ev["action"])
@@ -269,6 +324,12 @@ def record_poll(run: wt.Run, new_prs: list[dict], total_events: int) -> None:
         elif kind == "issue":
             issue_action_counts[ev["action"]] += 1
             issue_user_counts[ev["user"]] += 1
+        elif kind == "fork":
+            fork_counts[ev["action"]] += 1
+            fork_user_counts[ev["user"]] += 1
+        elif kind == "release":
+            release_counts[ev["action"]] += 1
+            release_user_counts[ev["user"]] += 1
         else:
             action_counts[ev["action"]] += 1
             repo_counts[ev["repo"]] += 1
@@ -323,7 +384,7 @@ if __name__ == "__main__":
     console.print("                owner/repo  [+added -deleted]")
     console.print("                title (60 chars)")
     console.print()
-    console.print(f"Types:  [white]PR[/white] pull request    [yellow]★[/yellow]  star    [white]#[/white]  issue")
+    console.print(f"Prefixes:  [white]PR[/white] pull request    [bright_yellow]*[/bright_yellow]  star    [white]#[/white]  issue    [blue]FK[/blue]  fork    [yellow]RL[/yellow]  release")
     console.print()
     console.print("Actions:")
     console.print("[green]opened[/green]")
@@ -339,6 +400,8 @@ if __name__ == "__main__":
     console.print("[cyan]rev_req_rm[/cyan]")
     console.print("[green]ready[/green]")
     console.print("[white]draft[/white]")
+    console.print("[blue]forked[/blue]")
+    console.print("[yellow]published[/yellow]")
     console.print()
 
     session_start = time.time()
@@ -368,6 +431,12 @@ if __name__ == "__main__":
             elif kind == "issue":
                 issue_action_counts[ev["action"]] += 1
                 issue_user_counts[ev["user"]] += 1
+            elif kind == "fork":
+                fork_counts[ev["action"]] += 1
+                fork_user_counts[ev["user"]] += 1
+            elif kind == "release":
+                release_counts[ev["action"]] += 1
+                release_user_counts[ev["user"]] += 1
             else:
                 action_counts[ev["action"]] += 1
                 repo_counts[ev["repo"]] += 1

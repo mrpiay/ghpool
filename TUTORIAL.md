@@ -239,7 +239,7 @@ Color scheme on line 1: action and its count use the action color; `by`, user co
 
 Two independent counters: action count (how many times this action has been seen) and user count (how many events this user has triggered). Both increment before `render_event` is called, so the displayed count always reflects the current event. Elapsed uses `session_start` set at launch. Long action names are shortened via `DISPLAY_ACTION` (`synchronize` → `pushed`, `review_requested` → `rev_req`).
 
-Three event types are handled: `PR`, `★` (star), `#` (issue). Each has its own counter dicts so PR counts and star counts stay independent.
+Five event types are handled: `PR`, `*` (star), `#` (issue), `FK` (fork), `RL` (release). Each has its own counter dicts so PR counts, star counts, fork counts, and release counts stay independent.
 
 Each action gets its own color:
 
@@ -258,6 +258,8 @@ Each action gets its own color:
 | review_request_removed | rev_req_rm | cyan |
 | ready_for_review | ready | green |
 | converted_to_draft | draft | white |
+| — (fork) | forked | blue |
+| — (release) | published | yellow |
 
 ---
 

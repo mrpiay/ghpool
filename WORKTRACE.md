@@ -45,6 +45,12 @@ metadata: {"poll_interval": 5, "token": true}
 | `pr.review_request_removed` | `gh/<owner/repo>` | same | Review request removed |
 | `pr.ready_for_review` | `gh/<owner/repo>` | same | Draft marked ready |
 | `pr.converted_to_draft` | `gh/<owner/repo>` | same | PR converted to draft |
+| `star.starred` | `gh/<owner/repo>` | `title`, `user`, `added`, `deleted` | Repo starred |
+| `issue.opened` | `gh/<owner/repo>` | same | Issue opened |
+| `issue.closed` | `gh/<owner/repo>` | same | Issue closed |
+| `issue.reopened` | `gh/<owner/repo>` | same | Issue reopened |
+| `fork.forked` | `gh/<owner/repo>` | `title` (forked repo name), `user` | Repo forked |
+| `release.published` | `gh/<owner/repo>` | `title` (release name/tag), `user` | Release published |
 | `session.end` | — | `poll_count`, `total_prs`, `by_action` | Ctrl+C |
 
 ### Snapshot (every poll cycle)
