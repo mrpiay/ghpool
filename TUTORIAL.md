@@ -520,25 +520,6 @@ for e in query.events(resource="gh/torvalds/linux"):
 
 ---
 
-## Part 6 — what comes next (v2 ideas)
-
-### Heatmap
-Group repos by PR activity over time. Which repos are hottest right now vs an hour ago? A Rich-based grid in the terminal or a simple web page.
-
-### Block visualization
-Like mempool.space's block view — each PR is a rectangle, size proportional to lines changed, color by action. A merge wave = blocks disappearing. Built with Flask + vanilla JS reading from the worktrace snapshot history.
-
-### Bot vs human filter
-`dependabot`, `github-actions`, `renovate` account for a large share of PRs. Filter them out to see only human activity, or compare bot vs human merge rates.
-
-### Language detection
-Parse the repo name or fetch repo metadata to group PRs by language. Are Python repos merging faster than Rust repos right now?
-
-### Alerting
-Query the last N snapshots and alert (print, send a notification) when merge rate drops suddenly — could indicate a GitHub outage or a global freeze.
-
----
-
 ## File structure
 
 ```
