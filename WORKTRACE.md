@@ -6,9 +6,11 @@ How ghpool uses worktrace, what gets recorded, and how to query it.
 
 ## Overview
 
-Every time you run `ghpool.py` it creates one **run** in worktrace. Inside that run, every poll cycle and every PR event is recorded as a structured **event**. Every poll cycle also writes a **snapshot** of the aggregate session state. Stop the script with Ctrl+C and the run closes cleanly.
+Every time you run `ghpool.py` it creates one **run** in worktrace. Inside that run, every poll cycle and every event (PR, star, issue, fork, release) is recorded as a structured **event**. Every poll cycle also writes a **snapshot** of the aggregate session state. Stop the script with Ctrl+C and the run closes cleanly.
 
-Run for an hour → you have a queryable timeline of GitHub's PR stream for that hour.
+Run for an hour → you have a queryable timeline of GitHub's global activity for that hour.
+
+Pass `--no-record` to skip all worktrace writes and run as a pure live feed.
 
 ---
 

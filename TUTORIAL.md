@@ -92,6 +92,7 @@ GITHUB_TOKEN=ghp_yourtoken123abc
 ```python
 import os
 import time
+import argparse
 import requests
 from collections import Counter
 from dotenv import load_dotenv
@@ -101,7 +102,8 @@ import worktrace as wt
 load_dotenv()
 ```
 
-- `Counter` — Python's built-in dict for counting things. Used to track how many `opened`, `merged`, `closed` events we've seen this session.
+- `Counter` — Python's built-in dict for counting things. Used to track how many `opened`, `merged`, `starred`, etc. events we've seen this session.
+- `argparse` — parses the `--no-record` flag.
 - `worktrace as wt` — installed via `pip install worktrace`, aliased to `wt` to keep calls compact.
 - `load_dotenv()` — reads `.env` and puts `GITHUB_TOKEN` into the environment.
 
@@ -116,16 +118,24 @@ POLL_INTERVAL = 5
 
 ```python
 seen: set[str] = set()
-action_counts: Counter = Counter()
-repo_counts: Counter = Counter()
+action_counts: Counter = Counter()   # PR actions
+repo_counts: Counter = Counter()     # PR repos
+user_counts: Counter = Counter()     # PR users
+star_counts: Counter = Counter()     # star actions
+star_user_counts: Counter = Counter()
+issue_action_counts: Counter = Counter()
+issue_user_counts: Counter = Counter()
+fork_counts: Counter = Counter()
+fork_user_counts: Counter = Counter()
+release_counts: Counter = Counter()
+release_user_counts: Counter = Counter()
 poll_count = 0
+session_start: float = 0.0
 ```
 
 - `seen` — a set of event IDs we've already processed. GitHub returns the same events across multiple polls; this prevents duplicates.
-- `action_counts` — running tally of PR actions this session: `{"opened": 12, "merged": 8, ...}`
-- `repo_counts` — running tally of which repos have the most PR activity
-- `user_counts` — running tally of users by PR activity, shown inline next to each username
-- `poll_count` — how many poll cycles have completed this session
+- Each event type (PR, star, issue, fork, release) has its own action and user counter dicts so their counts stay independent.
+- `session_start` — set at launch, used to compute the elapsed time shown on every event card.
 
 ---
 
@@ -302,62 +312,56 @@ def record_poll(run: wt.Run, new_prs: list[dict], total_events: int) -> None:
     )
 ```
 
-This is where ghpool becomes more than a ticker. Three things happen per poll:
+This is where ghpool becomes more than a ticker. If recording is enabled (default), three things happen per poll:
 
-1. **`poll.done` event** — records that a poll cycle completed, how many total events came back, how many were new PRs.
+1. **`poll.done` event** — records that a poll cycle completed, how many total events came back, how many were new.
 
-2. **One `pr.<action>` event per new PR** — each PR gets its own event, tagged with the repo as resource. This means you can later query `query.events(resource="gh/torvalds/linux")` and see only Linux kernel PRs.
+2. **One typed event per item** — each PR, star, fork, or release gets its own event (`pr.opened`, `star.starred`, `fork.forked`, `release.published`), tagged with the repo as resource. Query `query.events(resource="gh/torvalds/linux")` to see all activity on one repo.
 
 3. **One snapshot** — captures the full aggregate state of the session at this moment: total PRs seen, breakdown by action, top 10 most active repos. This is the time-series. Every poll adds one row to the snapshot history.
+
+If `--no-record` was passed, all `wt.*` calls are skipped — the live feed works exactly the same, nothing is written to disk.
 
 ---
 
 ### Main block
 
 ```python
-run = wt.start_run(
-    name="ghpool",
-    tags=["github", "prs"],
-    metadata={"poll_interval": POLL_INTERVAL, "token": bool(TOKEN)},
-)
+args = parser.parse_args()
+RECORD = not args.no_record
+
+run = wt.start_run(...) if RECORD else None
 ```
 
-Opens a worktrace run. Everything that follows — events, snapshots — is linked to this run by its ID. `metadata` records the session config so you know later how it was run.
+`--no-record` sets `RECORD = False` and `run = None`. Every `wt.*` call downstream is gated on `if run:`, so recording is fully skipped without changing any display logic. The title line shows `· recording on` (green) or `· recording off` (red) immediately on startup.
 
 ```python
 # seed phase
 initial = fetch_events()
-initial_prs = [parse_pr(e) for e in initial]
-initial_prs = [p for p in initial_prs if p]
+initial_evs = [parse_event(e) for e in initial]
 for e in initial:
     seen.add(e["id"])
-for pr in initial_prs:
-    render_pr(pr)
-wt.event("session.start", data={"seeded_events": len(initial), "seeded_prs": len(initial_prs)}, run=run)
+for ev in initial_evs:
+    # increment counters, render card
+    ...
+if run:
+    wt.event("session.start", ...)
 ```
 
-The seed phase shows the current state immediately on launch and marks all existing events as seen. Without this, the first poll would show up to 100 events all at once. `session.start` records in worktrace that the session began cleanly and how many events it started with.
+The seed phase shows the current state immediately on launch and marks all existing events as seen. Without this, the first poll would dump up to 100 events at once.
 
 ```python
 # poll loop
 while True:
     time.sleep(POLL_INTERVAL)
-    wt.event("poll.start", resource="github/events", run=run)
-    try:
-        events = fetch_events()
-    except Exception as ex:
-        wt.event("poll.failed", resource="github/events", data={"error": str(ex)}, run=run)
-        continue
-
-    new_prs = [parse_pr(e) for e in events if e["id"] not in seen]
-    # deduplicate and record
+    if run:
+        wt.event("poll.start", ...)
+    events = fetch_events()
     ...
-    record_poll(run, new_prs, len(events))
-    for pr in new_prs:
-        render_pr(pr)
+    record_poll(run, new_events, len(events))
 ```
 
-Every 5 seconds: emit `poll.start`, fetch, emit `poll.done` (inside `record_poll`), display new PRs. A failed fetch emits `poll.failed` with the error and `continue`s — the loop keeps running.
+Every 5 seconds: fetch, display new events, write to worktrace if recording. A failed fetch emits `poll.failed` (if recording) and `continue`s — the loop keeps running.
 
 ```python
 except KeyboardInterrupt:

@@ -30,8 +30,8 @@ Every open PR across GitHub is like a transaction waiting to be confirmed. ghpoo
 
 Most GitHub PR tools show *your* PRs or *your org's* PRs. ghpool watches all of GitHub — every public repo, every language, every timezone — and builds a timeline you can query.
 
-- **Live stream** — new PRs appear as they happen, every 5 seconds
-- **Persistent history** — every session is stored in a local SQLite database via worktrace
+- **Live stream** — pull requests, stars, issues, forks, and releases appear as they happen, every 5 seconds
+- **Persistent history** — every session is stored in a local SQLite database via worktrace (pass `--no-record` to skip)
 - **Queryable** — replay any session, filter by repo, action, or user, compute merge rates over time
 
 ---
