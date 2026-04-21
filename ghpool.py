@@ -28,9 +28,13 @@ POLL_INTERVAL = 5  # seconds — safe with token, change to 60 without
 
 console = Console(highlight=False)
 seen: set[str] = set()              # event IDs already displayed — prevents duplicates across polls
-action_counts: Counter = Counter()  # running tally of PR actions this session
-repo_counts: Counter = Counter()    # running tally of repos by PR activity
-user_counts: Counter = Counter()    # running tally of users by PR activity
+action_counts: Counter = Counter()        # PR actions
+repo_counts: Counter = Counter()          # PR repos
+user_counts: Counter = Counter()          # PR users
+star_counts: Counter = Counter()          # star actions
+star_user_counts: Counter = Counter()     # star users
+issue_action_counts: Counter = Counter()  # issue actions
+issue_user_counts: Counter = Counter()    # issue users
 poll_count = 0
 session_start: float = 0.0
 
@@ -104,6 +108,52 @@ def parse_pr(event: dict) -> dict | None:
         return None
 
 
+def parse_star(event: dict) -> dict | None:
+    """Extract a star event from a WatchEvent."""
+    if event.get("type") != "WatchEvent":
+        return None
+    try:
+        return {
+            "id": event["id"],
+            "kind": "star",
+            "action": "starred",
+            "repo": event["repo"]["name"],
+            "title": "",
+            "added": 0,
+            "deleted": 0,
+            "user": event["actor"]["login"],
+            "time": event["created_at"][11:19],
+        }
+    except (KeyError, TypeError):
+        return None
+
+
+def parse_issue(event: dict) -> dict | None:
+    """Extract an issue event from an IssuesEvent."""
+    if event.get("type") != "IssuesEvent":
+        return None
+    try:
+        issue = event["payload"]["issue"]
+        return {
+            "id": event["id"],
+            "kind": "issue",
+            "action": event["payload"].get("action", "?"),
+            "repo": event["repo"]["name"],
+            "title": (issue.get("title") or "").strip(),
+            "added": 0,
+            "deleted": 0,
+            "user": (issue.get("user") or {}).get("login", "?"),
+            "time": event["created_at"][11:19],
+        }
+    except (KeyError, TypeError):
+        return None
+
+
+def parse_event(event: dict) -> dict | None:
+    """Try to parse an event as a PR, star, or issue."""
+    return parse_pr(event) or parse_star(event) or parse_issue(event)
+
+
 # ---------------------------------------------------------------------------
 # Display
 # ---------------------------------------------------------------------------
@@ -133,10 +183,40 @@ DISPLAY_ACTION = {
 }
 
 
-def render_pr(pr: dict) -> None:
-    """Print one PR as a two-line card to the terminal."""
-    color = ACTION_COLOR.get(pr["action"], "white")
-    label = DISPLAY_ACTION.get(pr["action"], pr["action"])
+ISSUE_ACTION_COLOR = {
+    "opened": "green",
+    "closed": "red",
+    "reopened": "yellow",
+    "labeled": "blue",
+    "unlabeled": "blue",
+    "assigned": "yellow",
+    "unassigned": "yellow",
+}
+
+KIND_PREFIX = {"pr": "PR", "star": "★", "issue": "#"}
+
+
+def render_event(ev: dict) -> None:
+    """Print one event (PR, star, or issue) as a card."""
+    kind = ev.get("kind", "pr")
+    prefix = KIND_PREFIX.get(kind, "PR")
+
+    if kind == "star":
+        color = "yellow"
+        label = "starred"
+        a_count = star_counts[ev["action"]]
+        u_count = star_user_counts[ev["user"]]
+    elif kind == "issue":
+        color = ISSUE_ACTION_COLOR.get(ev["action"], "white")
+        label = ev["action"]
+        a_count = issue_action_counts[ev["action"]]
+        u_count = issue_user_counts[ev["user"]]
+    else:
+        color = ACTION_COLOR.get(ev["action"], "white")
+        label = DISPLAY_ACTION.get(ev["action"], ev["action"])
+        a_count = action_counts[ev["action"]]
+        u_count = user_counts[ev["user"]]
+
     elapsed = time.time() - session_start
     if elapsed < 60:
         elapsed_str = f"{int(elapsed)}s"
@@ -144,19 +224,26 @@ def render_pr(pr: dict) -> None:
         elapsed_str = f"{int(elapsed / 60)}m"
     else:
         elapsed_str = f"{elapsed / 3600:.1f}h"
-    action_stat = f"{label} ({action_counts[pr['action']]}/{elapsed_str})"
-    owner, _, repo_name = pr["repo"].partition("/")
+
+    user_display = ev["user"][:20]
+    action_stat = f"{label} ({a_count}) by {user_display} ({u_count}) · {elapsed_str}"
+    owner, _, repo_name = ev["repo"].partition("/")
     repo_display = f"{owner[:20]}/{repo_name[:20]}"
-    user_display = pr["user"][:20]
-    user_stat = f"{user_display} ({user_counts[pr['user']]}/{elapsed_str})"
-    added = f"+{pr['added'] / 1000:.1f}k" if pr["added"] >= 1000 else f"+{pr['added']}"
-    deleted = f"-{pr['deleted'] / 1000:.1f}k" if pr["deleted"] >= 1000 else f"-{pr['deleted']}"
-    size = f"[{added} {deleted}]"
-    console.print(f"[grey42]{pr['time']}[/grey42]  [{color}]{action_stat}[/{color}]")
-    console.print(f"{'':10}{repo_display}  {user_stat}  {size}")
-    if pr["title"]:
-        title = pr["title"][:60] + "..." if len(pr["title"]) > 60 else pr["title"]
+
+    console.print(f"[grey42]{ev['time']}[/grey42]  [{color}]{prefix:<3} {action_stat}[/{color}]")
+
+    if kind == "pr":
+        added = f"+{ev['added'] / 1000:.1f}k" if ev["added"] >= 1000 else f"+{ev['added']}"
+        deleted = f"-{ev['deleted'] / 1000:.1f}k" if ev["deleted"] >= 1000 else f"-{ev['deleted']}"
+        size = f"[{added} {deleted}]"
+        console.print(f"{'':10}{repo_display}  {size}")
+    else:
+        console.print(f"{'':10}{repo_display}")
+
+    if ev["title"]:
+        title = ev["title"][:60] + "..." if len(ev["title"]) > 60 else ev["title"]
         console.print(f"[grey42]{'':10}{title}[/grey42]")
+
     console.print()
 
 
@@ -174,12 +261,20 @@ def record_poll(run: wt.Run, new_prs: list[dict], total_events: int) -> None:
     global poll_count
     poll_count += 1
 
-    # update session-level counters and render each PR as its count increments
-    for pr in new_prs:
-        action_counts[pr["action"]] += 1
-        repo_counts[pr["repo"]] += 1
-        user_counts[pr["user"]] += 1
-        render_pr(pr)
+    # update session-level counters and render each event as its count increments
+    for ev in new_prs:
+        kind = ev.get("kind", "pr")
+        if kind == "star":
+            star_counts[ev["action"]] += 1
+            star_user_counts[ev["user"]] += 1
+        elif kind == "issue":
+            issue_action_counts[ev["action"]] += 1
+            issue_user_counts[ev["user"]] += 1
+        else:
+            action_counts[ev["action"]] += 1
+            repo_counts[ev["repo"]] += 1
+            user_counts[ev["user"]] += 1
+        render_event(ev)
 
     # record that this poll cycle completed
     wt.event(
@@ -193,17 +288,13 @@ def record_poll(run: wt.Run, new_prs: list[dict], total_events: int) -> None:
         run=run,
     )
 
-    # one event per PR — queryable by repo via resource="gh/owner/repo"
-    for pr in new_prs:
+    # one worktrace event per item — queryable by repo
+    for ev in new_prs:
+        kind = ev.get("kind", "pr")
         wt.event(
-            f"pr.{pr['action']}",
-            resource=f"gh/{pr['repo']}",
-            data={
-                "title": pr["title"],
-                "user": pr["user"],
-                "added": pr["added"],
-                "deleted": pr["deleted"],
-            },
+            f"{kind}.{ev['action']}",
+            resource=f"gh/{ev['repo']}",
+            data={"title": ev["title"], "user": ev["user"], "added": ev["added"], "deleted": ev["deleted"]},
             run=run,
         )
 
@@ -228,10 +319,12 @@ def record_poll(run: wt.Run, new_prs: list[dict], total_events: int) -> None:
 if __name__ == "__main__":
     console.print()
     console.print(f"[bold bright_white]ghpool — live GitHub PR stream  (Ctrl+C to stop)[/bold bright_white]\n")
-    console.print("PR format:")
-    console.print("HH:MM:SS (UTC)  ACTION (count / elapsed)")
-    console.print("          owner/repo  username (count / elapsed)  [+added -deleted]")
-    console.print("          PR title (60 chars)")
+    console.print("Format:")
+    console.print(r"HH:MM:SS (UTC)  \[type] ACTION (count) by username (count) · elapsed")
+    console.print("                owner/repo  [+added -deleted]")
+    console.print("                title (60 chars)")
+    console.print()
+    console.print(f"Types:  [white]PR[/white] pull request    [yellow]★[/yellow]  star    [white]#[/white]  issue")
     console.print()
     console.print("Actions:")
     console.print("[green]opened[/green]")
@@ -264,16 +357,24 @@ if __name__ == "__main__":
         initial = fetch_events()
         token_status = "token loaded" if TOKEN else "[red]no token — unauthenticated[/red]"
         console.print(f"{token_status} · {len(initial)} events fetched\n")
-        initial_prs = [parse_pr(e) for e in initial]
-        initial_prs = [p for p in initial_prs if p]
+        initial_evs = [parse_event(e) for e in initial]
+        initial_evs = [ev for ev in initial_evs if ev]
         for e in initial:
             seen.add(e["id"])
-        for pr in initial_prs:
-            action_counts[pr["action"]] += 1
-            repo_counts[pr["repo"]] += 1
-            user_counts[pr["user"]] += 1
-            render_pr(pr)
-        wt.event("session.start", data={"seeded_events": len(initial), "seeded_prs": len(initial_prs)}, run=run)
+        for ev in initial_evs:
+            kind = ev.get("kind", "pr")
+            if kind == "star":
+                star_counts[ev["action"]] += 1
+                star_user_counts[ev["user"]] += 1
+            elif kind == "issue":
+                issue_action_counts[ev["action"]] += 1
+                issue_user_counts[ev["user"]] += 1
+            else:
+                action_counts[ev["action"]] += 1
+                repo_counts[ev["repo"]] += 1
+                user_counts[ev["user"]] += 1
+            render_event(ev)
+        wt.event("session.start", data={"seeded_events": len(initial), "seeded_prs": len(initial_evs)}, run=run)
         console.print(f"Watching for new events every {POLL_INTERVAL}s...\n")
     except Exception as ex:
         wt.event("session.seed_failed", data={"error": str(ex)}, run=run)
@@ -296,9 +397,9 @@ if __name__ == "__main__":
                 if e["id"] in seen:
                     continue
                 seen.add(e["id"])
-                pr = parse_pr(e)
-                if pr:
-                    new_prs.append(pr)
+                ev = parse_event(e)
+                if ev:
+                    new_prs.append(ev)
 
             record_poll(run, new_prs, len(events))
 

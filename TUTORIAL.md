@@ -211,29 +211,33 @@ Turns a raw GitHub event dict into a clean PR dict. Steps:
 
 ---
 
-### render_pr()
+### render_event()
 
 ```python
-def render_pr(pr: dict) -> None:
-    color = ACTION_COLOR.get(pr["action"], "white")
-    label = DISPLAY_ACTION.get(pr["action"], pr["action"])
-    size = f"[grey42][+{pr['added']} -{pr['deleted']}][/grey42]"
-    action_stat = f"{label} ({action_counts[pr['action']]})"
-    user_stat = f"{pr['user']} ({user_counts[pr['user']]})"
-    console.print(f"[grey42]{pr['time']}[/grey42]  [{color}]{action_stat}[/{color}]")
-    console.print(f"{'':10}{pr['repo']}  {user_stat}  {size}")
-    if pr["title"]:
-        title = pr["title"][:60] + "..." if len(pr["title"]) > 60 else pr["title"]
+def render_event(ev: dict) -> None:
+    kind = ev.get("kind", "pr")
+    # ... kind-specific color and counter selection ...
+    action_stat = f"{label} ({a_count}) by {user_display} ({u_count}) · {elapsed_str}"
+    console.print(f"[grey42]{ev['time']}[/grey42]  [{color}]{prefix:<3} {action_stat}[/{color}]")
+    if kind == "pr":
+        size = f"[+{ev['added']} -{ev['deleted']}]"
+        console.print(f"{'':10}{repo_display}  {size}")
+    else:
+        console.print(f"{'':10}{repo_display}")
+    if ev["title"]:
+        title = ev["title"][:60] + "..." if len(ev["title"]) > 60 else ev["title"]
         console.print(f"[grey42]{'':10}{title}[/grey42]")
     console.print()
 ```
 
-Prints one PR as a 3-line card:
-- **Line 1**: timestamp (UTC) + action with session count — action is color-coded
-- **Line 2**: repo, username with session count, line diff
-- **Line 3**: PR title, truncated at 60 chars
+Prints one event (PR, star, or issue) as a 3-line card:
+- **Line 1**: timestamp (UTC) · type prefix · `ACTION (count) by username (count) · elapsed` — action is color-coded
+- **Line 2**: `owner/repo  [+added -deleted]` for PRs, just `owner/repo` for stars and issues
+- **Line 3**: title truncated at 60 chars (omitted if empty)
 
-Session counters (`action_counts`, `user_counts`) are incremented before each `render_pr` call, so the count shown reflects that PR's contribution. The elapsed time (`session_start` global, set at launch) turns raw counts into a rate — `opened (12/5m)` means 12 opens in the first 5 minutes. Long action names are shortened via `DISPLAY_ACTION` for readability.
+Two independent counters appear on line 1: action count (how many times this action has been seen this session) and user count (how many events from this user). Both increment before `render_event` is called, so the displayed count always reflects the current event's contribution. The elapsed string (`5m`, `1.2h`) uses `session_start` set at launch. Long action names are shortened via `DISPLAY_ACTION` (`synchronize` → `pushed`, `review_requested` → `rev_req`).
+
+Three event types are handled: `PR`, `★` (star), `#` (issue). Each has its own counter dicts so PR counts and star counts stay independent.
 
 Each action gets its own color:
 
@@ -398,11 +402,13 @@ ghpool — live GitHub PR stream  (Ctrl+C to stop)
 
 token loaded · 100 events fetched
 
-09:51:23  opened  GasperX93/swarm-notify  crtahlin
-  Web UI reference app with use cases and developer guidance  +3632 -0
+09:51:23  PR  opened (1) by crtahlin (1) · 0s
+          GasperX93/swarm-notify  [+3632 -0]
+          Web UI reference app with use cases and developer guidance
 
-09:51:24  merged  lightdash/lightdash  dependabot
-  build(deps): bump express from 4.18.2 to 4.19.2  +3 -3
+09:51:24  PR  merged (1) by dependabot (1) · 1s
+          lightdash/lightdash  [+3 -3]
+          build(deps): bump express from 4.18.2 to 4.19.2
 
 Watching for new events every 5s...
 ```

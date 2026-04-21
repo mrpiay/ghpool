@@ -5,21 +5,20 @@ A real-time feed of GitHub's global pull request stream, inspired by [mempool.sp
 Every open PR across GitHub is like a transaction waiting to be confirmed. ghpool surfaces that stream live — who's opening, merging, and closing PRs right now, across every public repo on GitHub — and stores a queryable history of it using [worktrace](https://github.com/Pedro-Oub/worktrace).
 
 ```
-10:03:43  merged (3/3m)
-          bartoszruta26-droid/Book-parser  bartoszruta26 (1/3m)  [+592 -0]
+10:03:43  PR  merged (1) by bartoszruta26 (1) · 3m
+          bartoszruta26-droid/Book-parser  [+592 -0]
           Update from task e5210d51
 
-10:03:43  opened (7/3m)
-          pharo-spec/NewTools  pharo-contributor (2/3m)  [+61 -1]
+10:03:43  PR  opened (1) by pharo-contributor (1) · 3m
+          pharo-spec/NewTools  [+61 -1]
           [Method Browser] Refactoring command migration
 
-10:04:32  merged (4/4m)
-          mthines/gw-tools  mthines (1/4m)  [+34 -3]
+10:04:32  PR  merged (2) by mthines (1) · 4m
+          mthines/gw-tools  [+34 -3]
           fix(shell): validate nav marker path exists before cd
 
-10:04:47  opened (8/4m)
-          darylwui/plsfundme  darylwui (1/4m)  [+607 -0]
-          Add Singpass Myinfo KYC design spec
+10:04:47  ★   starred (1) by darylwui (1) · 4m
+          darylwui/plsfundme
 ```
 
 ---
