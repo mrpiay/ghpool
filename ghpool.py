@@ -6,7 +6,8 @@ PullRequestEvents, displays them as a live feed, and records everything
 to a local SQLite database via worktrace.
 
 Usage:
-    python ghpool.py
+    python ghpool.py             # record session to SQLite
+    python ghpool.py --no-record # live feed only, nothing written to disk
 
 Requires a .env file with GITHUB_TOKEN=<your token>.
 See README.md for setup instructions.
@@ -14,6 +15,7 @@ See README.md for setup instructions.
 
 import os
 import time
+import argparse
 import requests
 from collections import Counter
 from dotenv import load_dotenv
@@ -305,9 +307,8 @@ def render_event(ev: dict) -> None:
 # worktrace helpers
 # ---------------------------------------------------------------------------
 
-def record_poll(run: wt.Run, new_prs: list[dict], total_events: int) -> None:
-    """Write one poll cycle to worktrace: a poll.done event, one pr.* event
-    per new PR, and a snapshot of the full session state.
+def record_poll(run, new_prs: list[dict], total_events: int) -> None:
+    """Update counters, render new events, and write to worktrace if recording.
 
     The snapshot is what builds the queryable time-series — every poll adds
     one row, so you can later compare activity across minutes or hours.
@@ -336,7 +337,9 @@ def record_poll(run: wt.Run, new_prs: list[dict], total_events: int) -> None:
             user_counts[ev["user"]] += 1
         render_event(ev)
 
-    # record that this poll cycle completed
+    if run is None:
+        return
+
     wt.event(
         "poll.done",
         resource="github/events",
@@ -348,7 +351,6 @@ def record_poll(run: wt.Run, new_prs: list[dict], total_events: int) -> None:
         run=run,
     )
 
-    # one worktrace event per item — queryable by repo
     for ev in new_prs:
         kind = ev.get("kind", "pr")
         wt.event(
@@ -358,7 +360,6 @@ def record_poll(run: wt.Run, new_prs: list[dict], total_events: int) -> None:
             run=run,
         )
 
-    # snapshot of session aggregate state — one per poll, stacks up over time
     wt.snapshot(
         resource="gh/pr-stream",
         kind="activity",
@@ -377,6 +378,11 @@ def record_poll(run: wt.Run, new_prs: list[dict], total_events: int) -> None:
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--no-record", action="store_true", help="disable worktrace recording")
+    args = parser.parse_args()
+    RECORD = not args.no_record
+
     console.print()
     console.print(f"[bold bright_white]ghpool — live GitHub PR stream  (Ctrl+C to stop)[/bold bright_white]\n")
     console.print("Format:")
@@ -406,19 +412,19 @@ if __name__ == "__main__":
 
     session_start = time.time()
 
-    # open a worktrace run for this session
     run = wt.start_run(
         name="ghpool",
         tags=["github", "prs"],
         metadata={"poll_interval": POLL_INTERVAL, "token": bool(TOKEN)},
-    )
+    ) if RECORD else None
 
     # seed: fetch current events, show existing PRs, mark all as seen
     # without this, the first poll would dump up to 100 events at once
     try:
         initial = fetch_events()
         token_status = "token loaded" if TOKEN else "[red]no token — unauthenticated[/red]"
-        console.print(f"{token_status} · {len(initial)} events fetched\n")
+        record_status = "" if RECORD else " · [grey42]recording off[/grey42]"
+        console.print(f"{token_status} · {len(initial)} events fetched{record_status}\n")
         initial_evs = [parse_event(e) for e in initial]
         initial_evs = [ev for ev in initial_evs if ev]
         for e in initial:
@@ -442,20 +448,24 @@ if __name__ == "__main__":
                 repo_counts[ev["repo"]] += 1
                 user_counts[ev["user"]] += 1
             render_event(ev)
-        wt.event("session.start", data={"seeded_events": len(initial), "seeded_prs": len(initial_evs)}, run=run)
+        if run:
+            wt.event("session.start", data={"seeded_events": len(initial), "seeded_prs": len(initial_evs)}, run=run)
         console.print(f"Watching for new events every {POLL_INTERVAL}s...\n")
     except Exception as ex:
-        wt.event("session.seed_failed", data={"error": str(ex)}, run=run)
+        if run:
+            wt.event("session.seed_failed", data={"error": str(ex)}, run=run)
         console.print(f"[red]Failed to seed: {ex}[/red]")
 
     try:
         while True:
             time.sleep(POLL_INTERVAL)
-            wt.event("poll.start", resource="github/events", run=run)
+            if run:
+                wt.event("poll.start", resource="github/events", run=run)
             try:
                 events = fetch_events()
             except Exception as ex:
-                wt.event("poll.failed", resource="github/events", data={"error": str(ex)}, run=run)
+                if run:
+                    wt.event("poll.failed", resource="github/events", data={"error": str(ex)}, run=run)
                 console.print(f"[red]fetch error: {ex}[/red]")
                 continue
 
@@ -473,14 +483,14 @@ if __name__ == "__main__":
 
     except KeyboardInterrupt:
         console.print("\n[dim]stopped.[/dim]")
-        # close the run cleanly with final session totals
-        wt.event(
-            "session.end",
-            data={
-                "poll_count": poll_count,
-                "total_prs": sum(action_counts.values()),
-                "by_action": dict(action_counts),
-            },
-            run=run,
-        )
-        wt.end_run(run, status="success")
+        if run:
+            wt.event(
+                "session.end",
+                data={
+                    "poll_count": poll_count,
+                    "total_prs": sum(action_counts.values()),
+                    "by_action": dict(action_counts),
+                },
+                run=run,
+            )
+            wt.end_run(run, status="success")

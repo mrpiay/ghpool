@@ -61,7 +61,8 @@ GITHUB_TOKEN=ghp_yourtoken123abc
 **4. Run**
 
 ```bash
-python ghpool.py
+python ghpool.py             # record session to SQLite
+python ghpool.py --no-record # live feed only, nothing written to disk
 ```
 
 ---
