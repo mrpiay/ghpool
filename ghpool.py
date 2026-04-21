@@ -247,7 +247,7 @@ def render_event(ev: dict) -> None:
     prefix = KIND_PREFIX.get(kind, "PR")
 
     if kind == "star":
-        color = "bright_yellow"
+        color = "yellow"
         label = "starred"
         a_count = star_counts[ev["action"]]
         u_count = star_user_counts[ev["user"]]
@@ -262,7 +262,7 @@ def render_event(ev: dict) -> None:
         a_count = fork_counts[ev["action"]]
         u_count = fork_user_counts[ev["user"]]
     elif kind == "release":
-        color = "yellow"
+        color = "cyan"
         label = ev["action"]
         a_count = release_counts[ev["action"]]
         u_count = release_user_counts[ev["user"]]
@@ -384,7 +384,7 @@ if __name__ == "__main__":
     console.print("                owner/repo  [+added -deleted]")
     console.print("                title (60 chars)")
     console.print()
-    console.print(f"Prefixes:  [white]PR[/white] pull request    [bright_yellow]*[/bright_yellow]  star    [white]#[/white]  issue    [blue]FK[/blue]  fork    [yellow]RL[/yellow]  release")
+    console.print(f"Prefixes:  [white]PR[/white] pull request    [yellow]*[/yellow]  star    [white]#[/white]  issue    [blue]FK[/blue]  fork    [cyan]RL[/cyan]  release")
     console.print()
     console.print("Actions:")
     console.print("[green]opened[/green]")
@@ -401,7 +401,7 @@ if __name__ == "__main__":
     console.print("[green]ready[/green]")
     console.print("[white]draft[/white]")
     console.print("[blue]forked[/blue]")
-    console.print("[yellow]published[/yellow]")
+    console.print("[cyan]published[/cyan]")
     console.print()
 
     session_start = time.time()

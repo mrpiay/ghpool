@@ -259,7 +259,7 @@ Each action gets its own color:
 | ready_for_review | ready | green |
 | converted_to_draft | draft | white |
 | — (fork) | forked | blue |
-| — (release) | published | yellow |
+| — (release) | published | cyan |
 
 ---
 
